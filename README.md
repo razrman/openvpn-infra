@@ -38,7 +38,7 @@ The PKI is not in either state. `scripts/openvpn-client.sh` stores it in SSM Par
 
 The instance never receives a client private key or the CA key. It writes a `client-config-dir` file per active client (`ifconfig-push`) and re-reads SSM about once a minute. A new client is usable on the next sync without replacing the instance. A changed CRL restarts OpenVPN so a client that is already connected is dropped and cannot reconnect.
 
-Client-to-client traffic stays inside OpenVPN (`client-to-client`). Traffic from a client to GoNetLogo's `10.20.0.0/16` is forwarded by the instance and masqueraded to the instance's own address in the default VPC. Nothing else is masqueraded, and there is no NAT gateway. The server does not push a default route.
+Traffic between VPN clients, and from clients into the peered VPC, is forwarded by the kernel. `infra/vpn/access.yaml` is the allowlist. There is no `client-to-client` directive, so OpenVPN does not bypass that firewall. Allowed traffic into `10.20.0.0/16` is masqueraded to the instance's address in the default VPC. Nothing else is masqueraded, and there is no NAT gateway. The server does not push a default route.
 
 ## Address plan
 
@@ -54,7 +54,7 @@ Client-to-client traffic stays inside OpenVPN (`client-to-client`). Traffic from
 
 The home LAN must not be `10.8.0.0/24`. If it is, change `vpn_cidr` in `infra/vpn/variables.tf` and `VPN_PREFIX` in `scripts/openvpn-client.sh` together, and do that before you add a client. The script is the piece that picks static addresses.
 
-`allowed_cidrs` in `infra/vpn/variables.tf` controls who can send UDP 1194. The default is `0.0.0.0/0`. TLS plus tls-crypt is the real gate. Set a `/32` and run Infra up to narrow it. This stack does not add IPv6 rules.
+Who may send UDP 1194 is `allowed_cidrs`, and on Infra up that value comes from the `VPN_ALLOWED_CIDRS` repository variable. The details are under Allowlists. This stack does not add IPv6 rules.
 
 Profiles say `remote vpn.app.sapienexmachina.si 1194 udp` and `resolv-retry infinite`. They do not contain the instance's public address, so a rebuild does not require a new `.ovpn`. GoDaddy is not edited. The zone already exists for GoNetLogo.
 
@@ -178,6 +178,57 @@ aws ssm start-session --target "$(tofu output -raw instance_id)"
 ```
 
 On the instance, `sudo journalctl -u openvpn-server@server` and `sudo tail -n 200 /var/log/cloud-init-output.log`. If user-data failed because `init` had not been run, run `init`, then either replace the instance or start `/usr/local/sbin/openvpn-sync` and `openvpn-server@server` from that session.
+
+## Allowlists
+
+Two lists. They are not the same thing.
+
+### Who can open UDP 1194
+
+`allowed_cidrs` is the only internet allowlist. The security group uses it and nothing else does. TLS and tls-crypt still authenticate the session. This is an extra cut in front of that.
+
+Infra up and Infra plan read the repository variable `VPN_ALLOWED_CIDRS` (Settings → Secrets and variables → Actions → Variables). It is not a secret. Leave it unset and the workflows use `0.0.0.0/0`. Set it to a comma-separated list or a JSON list:
+
+```text
+203.0.113.10/32, 198.51.100.0/24
+```
+
+```text
+["203.0.113.10/32", "198.51.100.0/24"]
+```
+
+A bad entry fails the workflow before OpenTofu runs, with the CIDR and the reason. A bare address such as `203.0.113.10` is taken as a `/32`. Host bits are rejected (`203.0.113.10/24` is not the network address; use `203.0.113.0/24`). IPv6 is rejected. An empty list is rejected. A local `tofu apply` that does not set `TF_VAR_allowed_cidrs` uses the default `0.0.0.0/0` and will reopen the port. Use the workflow, or export the same JSON list.
+
+Find the address you are connecting from:
+
+```bash
+curl -4 -fsS https://checkip.amazonaws.com
+```
+
+On Windows:
+
+```powershell
+(Invoke-RestMethod https://checkip.amazonaws.com).Trim()
+```
+
+That address is a `/32` only until the ISP or the cloud egress changes it. A residential address often changes. A phone on another network, or a laptop on hotel wifi, is locked out until its prefix is on the list. The remote Linux box leaves through whatever address its cloud provider uses that day, which may be a shared pool rather than one stable host, so put every prefix it might use. Several CIDRs are the normal case. Changing the variable and running Infra up updates the security group in place. It does not replace the instance.
+
+### Who can talk inside the tunnel
+
+`infra/vpn/access.yaml` names the new connections that may be forwarded. Return traffic and an ICMP echo in that same direction are added for each rule. Everything else is dropped, including the dynamic pool `10.8.0.200`–`10.8.0.249`. There is no rule from `windows-pc` or `mac-mini` to `linux-box`, so that direction does not exist. `any-client` means every active static client. `gonetlogo` means `10.20.0.0/16`.
+
+Names are resolved from the SSM address book when `openvpn-sync` runs. A rule that names a client who has not been added yet is skipped until that client exists, then the next sync installs it. Sync rebuilds the chain in one step and accepts flows that are already established, so an update does not cut an open session. A session that the new list would refuse dies when it ends, and the next attempt is dropped. Drops are logged at about six a minute with the prefix `openvpn-drop:` and shipped to the `/openvpn/server` log group.
+
+To let `linux-box` reach a new client on port 1337, add the client, give it a static address, and add a rule:
+
+```yaml
+  - from: linux-box
+    to: mac-mini
+    proto: tcp
+    port: 1337
+```
+
+Editing `access.yaml` changes user-data. The next Infra up replaces the instance. Reconnect afterwards. Adding only a client, without a new rule, does not replace the instance. The next sync picks up the new address for rules that already name it.
 
 ## Reaching GoNetLogo
 

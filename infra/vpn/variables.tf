@@ -12,7 +12,7 @@ variable "account_id" {
 
 variable "allowed_cidrs" {
   type        = list(string)
-  description = "IPv4 CIDRs allowed to reach OpenVPN on UDP 1194. The default is the whole internet. OpenVPN authenticates with TLS and tls-crypt; this list is an extra cut. Edit it and apply to lock the port to a known address. IPv6 is not enabled on the VPC."
+  description = "IPv4 CIDRs allowed to reach OpenVPN on UDP 1194. This is the only internet allowlist. Infra up and Infra plan pass VPN_ALLOWED_CIDRS when that GitHub variable is set, and use 0.0.0.0/0 when it is empty. IPv6 is not accepted."
   default     = ["0.0.0.0/0"]
 
   validation {

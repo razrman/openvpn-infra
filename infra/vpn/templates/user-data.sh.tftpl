@@ -61,6 +61,22 @@ ${sync_script}
 OPENVPN_SYNC_SCRIPT_END
 chmod 0755 /usr/local/sbin/openvpn-sync
 
+install -d -m 0755 /usr/local/lib
+cat > /usr/local/lib/render-access.py <<'OPENVPN_RENDER_ACCESS_END'
+${render_script}
+OPENVPN_RENDER_ACCESS_END
+chmod 0755 /usr/local/lib/render-access.py
+
+cat > /usr/local/sbin/openvpn-access <<'OPENVPN_ACCESS_END'
+${access_script}
+OPENVPN_ACCESS_END
+chmod 0755 /usr/local/sbin/openvpn-access
+
+cat > /etc/openvpn/access.yaml <<'OPENVPN_ACCESS_YAML_END'
+${access_yaml}
+OPENVPN_ACCESS_YAML_END
+chmod 0644 /etc/openvpn/access.yaml
+
 cat > /etc/openvpn/server/server.conf <<'OPENVPN_SERVER_CONF_END'
 ${server_conf}
 OPENVPN_SERVER_CONF_END
@@ -104,8 +120,22 @@ cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'OPENV
 ${cwagent_json}
 OPENVPN_CWAGENT_END
 
-touch /var/log/openvpn/server.log
-chmod 0644 /var/log/openvpn/server.log
+touch /var/log/openvpn/server.log /var/log/openvpn/firewall.log
+chmod 0644 /var/log/openvpn/server.log /var/log/openvpn/firewall.log
+
+cat > /etc/systemd/system/openvpn-fwlog.service <<'OPENVPN_FWLOG_END'
+[Unit]
+Description=Send rate-limited OpenVPN forward drops to a file
+After=systemd-journald.service
+
+[Service]
+ExecStart=/bin/bash -c "journalctl -kf -o cat -n 0 | grep --line-buffered -F openvpn-drop:"
+StandardOutput=append:/var/log/openvpn/firewall.log
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+OPENVPN_FWLOG_END
 
 echo "openvpn user-data: sync PKI"
 /usr/local/sbin/openvpn-sync
@@ -114,6 +144,7 @@ systemctl daemon-reload
 %{ if peer_gonetlogo ~}
 systemctl enable --now openvpn-nat.service
 %{ endif ~}
+systemctl enable --now openvpn-fwlog.service
 systemctl enable --now openvpn-server@server
 systemctl enable --now openvpn-sync.timer
 

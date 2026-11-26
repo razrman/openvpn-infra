@@ -17,16 +17,10 @@ if [ -z "$iface" ]; then
   exit 1
 fi
 
+# Forwarding policy lives in openvpn-access. This only rewrites the
+# source of traffic that the filter has already allowed toward the peer.
 if ! iptables -t nat -C POSTROUTING -s "$vpn_cidr" -d "$peer_cidr" -o "$iface" -j MASQUERADE 2>/dev/null; then
   iptables -t nat -A POSTROUTING -s "$vpn_cidr" -d "$peer_cidr" -o "$iface" -j MASQUERADE
-fi
-
-if ! iptables -C FORWARD -s "$vpn_cidr" -d "$peer_cidr" -j ACCEPT 2>/dev/null; then
-  iptables -A FORWARD -s "$vpn_cidr" -d "$peer_cidr" -j ACCEPT
-fi
-
-if ! iptables -C FORWARD -s "$peer_cidr" -d "$vpn_cidr" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; then
-  iptables -A FORWARD -s "$peer_cidr" -d "$vpn_cidr" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 fi
 
 echo "openvpn-nat: $vpn_cidr -> $peer_cidr via $iface" >&2
