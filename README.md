@@ -8,6 +8,8 @@ Account `457504029722`, region `us-west-2`. OpenTofu `1.13.9` (the pin is `infra
 
 This repository is public. Client profiles and `infra/bootstrap/terraform.tfstate` are secret. Both are gitignored. Do not paste a profile into an Actions log, a pull request, or a chat.
 
+**What changed.** The next Infra up replaces the instance. SSH to the VPN server is `ssh ec2-user@10.8.0.1`, and only from a tunnel client named in `access.yaml` (`desktop-crnncuc` and `linux-box`). sshd listens on `10.8.0.1` only, and only after `VPN_SSH_AUTHORIZED_KEYS` holds a public key. Port 22 is not in the security group. Leave that variable empty and sshd is unchanged.
+
 ## Certificates and trust
 
 Each client has its own private key and its own certificate, signed by one CA. There is no shared client certificate and no username or password.
@@ -229,6 +231,27 @@ To let `linux-box` reach a new client on port 1337, add the client, give it a st
 ```
 
 Editing `access.yaml` changes user-data. The next Infra up replaces the instance. Reconnect afterwards. Adding only a client, without a new rule, does not replace the instance. The next sync picks up the new address for rules that already name it.
+
+`to: vpn-server` is the tunnel address `10.8.0.1`, which is input to the server rather than a forwarded packet. Those rules allow TCP 22 on `tun0` only. The current list is `desktop-crnncuc` (`10.8.0.13`) and `linux-box` (`10.8.0.11`). Other clients, including the dynamic pool, are dropped and logged the same way as other denied forwards.
+
+### SSH to the server
+
+The account is `ec2-user`, the Amazon Linux default. From a connected client that the allowlist names:
+
+```bash
+ssh ec2-user@10.8.0.1
+```
+
+Set the repository variable `VPN_SSH_AUTHORIZED_KEYS` (Settings → Secrets and variables → Actions → Variables, not a secret) to one or more OpenSSH public keys, one per line. A private key is rejected. Then run Infra up. The next boot writes them to `/home/ec2-user/.ssh/authorized_keys` (`0700` on the directory, `0600` on the file). sshd allows public keys only, refuses passwords and root login, and listens only on `10.8.0.1` after the tunnel is up. The security group still has no TCP 22 rule, so the public address never accepts SSH.
+
+Add John's PC as its own client before that SSH rule can match. On the administrator shell:
+
+```bash
+./scripts/openvpn-client.sh add desktop-crnncuc --ip 10.8.0.13
+./scripts/openvpn-client.sh show desktop-crnncuc
+```
+
+Import that profile on the Windows PC. `linux-box` is already `10.8.0.11` if you followed the earlier example. Leave `VPN_SSH_AUTHORIZED_KEYS` empty and this stack does not install a key and does not change sshd.
 
 ## Reaching GoNetLogo
 

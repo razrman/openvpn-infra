@@ -46,7 +46,7 @@ expect_cidr_fail "[]" "at least one"
 expect_cidr_fail "[1, 2]" "strings"
 
 cat >"$tmp/clients.json" <<'EOF'
-{"linux-box":"10.8.0.11","windows-pc":"10.8.0.10"}
+{"linux-box":"10.8.0.11","windows-pc":"10.8.0.10","desktop-crnncuc":"10.8.0.13"}
 EOF
 
 python3 "$root/scripts/render-access.py" \
@@ -54,10 +54,10 @@ python3 "$root/scripts/render-access.py" \
   >"$tmp/rules" 2>"$tmp/warn"
 grep -q "client mac-mini is not active" "$tmp/warn" || fail "missing mac-mini should warn"
 grep -q -- '-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' "$tmp/rules" || fail "established"
-grep -q -- '-s 10.8.0.11 -d 10.8.0.10 -p tcp --dport 1337' "$tmp/rules" || fail "jan rule"
+grep -q -- '-d 10.8.0.10 -s 10.8.0.11 -p tcp --dport 1337' "$tmp/rules" || fail "jan rule"
 grep -q -- '-s 10.8.0.11 -d 10.8.0.10 -p icmp --icmp-type echo-request' "$tmp/rules" || fail "echo"
-grep -q -- '-s 10.8.0.11 -d 10.20.0.0/16 -p tcp --dport 8080' "$tmp/rules" || fail "gonetlogo from linux-box"
-grep -q -- '-s 10.8.0.10 -d 10.20.0.0/16 -p tcp --dport 8080' "$tmp/rules" || fail "gonetlogo from windows-pc"
+grep -q -- '-d 10.20.0.0/16 -s 10.8.0.11 -p tcp --dport 8080' "$tmp/rules" || fail "gonetlogo from linux-box"
+grep -q -- '-d 10.20.0.0/16 -s 10.8.0.10 -p tcp --dport 8080' "$tmp/rules" || fail "gonetlogo from windows-pc"
 if grep -q -- '-s 10.8.0.10 -d 10.8.0.11 -p tcp' "$tmp/rules"; then
   fail "windows-pc must not open tcp to linux-box"
 fi
@@ -69,6 +69,24 @@ if grep -E -q '10\.8\.0\.2[0-4][0-9]' "$tmp/rules"; then
 fi
 grep -q 'openvpn-drop:' "$tmp/rules" || fail "drop log"
 grep -q -- '-j DROP' "$tmp/rules" || fail "drop"
+grep -q -- '-A OPENVPN_IN -i tun+ -d 10.8.0.1 -s 10.8.0.13 -p tcp --dport 22' "$tmp/rules" || fail "ssh from desktop"
+grep -q -- '-A OPENVPN_IN -i tun+ -d 10.8.0.1 -s 10.8.0.11 -p tcp --dport 22' "$tmp/rules" || fail "ssh from linux-box"
+if grep -q -- '-s 10.8.0.10 -p tcp --dport 22' "$tmp/rules"; then
+  fail "windows-pc must not have ssh"
+fi
+if grep -E -q 'from_port[[:space:]]*=[[:space:]]*22' "$root/infra/vpn/network.tf"; then
+  fail "security group must not open port 22"
+fi
+
+empty_keys="$(VPN_SSH_AUTHORIZED_KEYS='' bash "$root/scripts/ssh-authorized-keys.sh")"
+[ -z "$empty_keys" ] || fail "empty SSH variable should produce no keys"
+fake='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyForUnitTests unit-test'
+got="$(VPN_SSH_AUTHORIZED_KEYS="$fake" bash "$root/scripts/ssh-authorized-keys.sh")"
+[ "$got" = "$fake" ] || fail "public key was not kept"
+if VPN_SSH_AUTHORIZED_KEYS='-----BEGIN OPENSSH PRIVATE KEY-----' bash "$root/scripts/ssh-authorized-keys.sh" >"$tmp/ssh.out" 2>"$tmp/ssh.err"; then
+  fail "private key should be rejected"
+fi
+grep -q "private key" "$tmp/ssh.err" || fail "private key error text"
 
 cat >"$tmp/pool.json" <<'EOF'
 {"linux-box":"10.8.0.201"}

@@ -119,6 +119,23 @@ jobs:
             echo "EOF"
           } >>"$GITHUB_ENV"
 
+      - name: Pass SSH public keys
+        env:
+          VPN_SSH_AUTHORIZED_KEYS: ${{ vars.VPN_SSH_AUTHORIZED_KEYS }}
+        run: |
+          set -euo pipefail
+          keys="$(bash scripts/ssh-authorized-keys.sh)"
+          count=0
+          if [ -n "$keys" ]; then
+            count="$(printf '%s\n' "$keys" | grep -c .)"
+          fi
+          echo "SSH public keys: $count"
+          {
+            echo "TF_VAR_ssh_authorized_keys<<SSHKEYS_EOF"
+            printf '%s\n' "$keys"
+            echo "SSHKEYS_EOF"
+          } >>"$GITHUB_ENV"
+
       - name: Plan
         working-directory: infra/vpn
         run: |

@@ -33,12 +33,14 @@ locals {
       gonetlogo_network = local.gonetlogo_network
       gonetlogo_netmask = local.gonetlogo_netmask
     })
-    sync_service   = file("${path.module}/files/openvpn-sync.service")
-    sync_timer     = file("${path.module}/files/openvpn-sync.timer")
-    cwagent_json   = file("${path.module}/files/amazon-cloudwatch-agent.json")
-    peer_gonetlogo = var.peer_gonetlogo
-    vpn_cidr       = var.vpn_cidr
-    gonetlogo_cidr = var.gonetlogo_cidr
+    sync_service        = file("${path.module}/files/openvpn-sync.service")
+    sync_timer          = file("${path.module}/files/openvpn-sync.timer")
+    cwagent_json        = file("${path.module}/files/amazon-cloudwatch-agent.json")
+    peer_gonetlogo      = var.peer_gonetlogo
+    vpn_cidr            = var.vpn_cidr
+    gonetlogo_cidr      = var.gonetlogo_cidr
+    ssh_authorized_keys = var.ssh_authorized_keys
+    server_vpn_ip       = local.server_ip
   })
 
   user_data = join("", [
