@@ -18,14 +18,19 @@ output "github_subjects" {
   value       = var.github_subjects
 }
 
-output "eip_public_ip" {
-  description = "Stable OpenVPN address. Client profiles use this as their remote."
-  value       = aws_eip.vpn.public_ip
+output "zone_name" {
+  description = "Existing zone the A record is written into. This stack does not create it and does not change GoDaddy."
+  value       = data.aws_route53_zone.app.name
 }
 
-output "eip_allocation_id" {
-  description = "Elastic IP allocation. The vpn stack associates it and does not own it."
-  value       = aws_eip.vpn.allocation_id
+output "hosted_zone_id" {
+  description = "Zone id the deploy role is scoped to. Re-apply bootstrap if GoNetLogo replaces the zone."
+  value       = data.aws_route53_zone.app.zone_id
+}
+
+output "vpn_hostname" {
+  description = "Only name the deploy role may change. Client profiles use this as remote."
+  value       = var.vpn_hostname
 }
 
 output "budget_email" {

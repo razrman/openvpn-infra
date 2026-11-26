@@ -37,6 +37,7 @@ export AWS_DEFAULT_REGION="$AWS_REGION"
 EXPECTED_ACCOUNT="457504029722"
 SERVER_CN="openvpn-server"
 VPN_PREFIX="10.8.0"
+REMOTE_HOST="vpn.app.sapienexmachina.si"
 CERT_DAYS="1825"
 CA_DAYS="3650"
 
@@ -352,17 +353,6 @@ fetch_clients() {
   aws ssm get-parameters-by-path --path /openvpn/clients --recursive --output json --region "$AWS_REGION" >"$WORKDIR/clients.json"
 }
 
-endpoint_ip() {
-  local ip
-  ip="$(aws ec2 describe-addresses \
-    --filters Name=tag:Name,Values=openvpn Name=tag:Project,Values=openvpn \
-    --query 'Addresses[0].PublicIp' --output text --region "$AWS_REGION")"
-  if [ -z "$ip" ] || [ "$ip" = "None" ]; then
-    die "no Elastic IP tagged Name=openvpn in ${AWS_REGION}. Apply infra/bootstrap first."
-  fi
-  printf '%s\n' "$ip"
-}
-
 pick_ip() {
   python3 - "$WORKDIR/clients.json" "$1" "$2" "$VPN_PREFIX" <<'PY'
 import json
@@ -430,12 +420,13 @@ def read(path):
 parts = [
     "# Dedicated certificate for %s. Do not share this file.\n" % name,
     "# vpn-ip: %s\n" % vpn_ip,
-    "# Split tunnel: the server pushes only the VPN subnet. No redirect-gateway.\n",
+    "# Split tunnel: no redirect-gateway. The server pushes the VPN subnet\n",
+    "# and, when peering is on, the GoNetLogo CIDR.\n",
     "# No username or password. Authentication is this certificate.\n",
     "client\n",
     "dev tun\n",
     "proto udp\n",
-    "remote %s 1194\n" % remote_ip,
+    "remote %s 1194 udp\n" % remote_ip,
     "resolv-retry infinite\n",
     "nobind\n",
     "persist-key\n",
@@ -596,7 +587,7 @@ cmd_revoke() {
 }
 
 cmd_show() {
-  local name="" output="" status vpn_ip remote server_cn dest parent
+  local name="" output="" status vpn_ip server_cn dest parent
   name="${1:-}"
   [ -n "$name" ] || die "usage: openvpn-client.sh show <name> [--output <file>]"
   shift
@@ -633,19 +624,18 @@ cmd_show() {
   assert_eku "$WORKDIR/client.crt" "TLS Web Client Authentication"
   assert_cn "$WORKDIR/server.crt" "$SERVER_CN"
   server_cn="$SERVER_CN"
-  remote="$(endpoint_ip)"
   if [ -n "$output" ]; then
     dest="$output"
   else
     dest="${PWD}/clients/${name}.ovpn"
   fi
-  render_ovpn "$name" "$vpn_ip" "$remote" "$server_cn" "$dest"
+  render_ovpn "$name" "$vpn_ip" "$REMOTE_HOST" "$server_cn" "$dest"
   chmod 600 "$dest"
   parent="$(dirname "$dest")"
   if [ "$(basename "$parent")" = "clients" ]; then
     chmod 700 "$parent"
   fi
-  printf 'wrote: %s\nclient: %s\nvpn_ip: %s\nremote: %s\n' "$dest" "$name" "$vpn_ip" "$remote"
+  printf 'wrote: %s\nclient: %s\nvpn_ip: %s\nremote: %s\n' "$dest" "$name" "$vpn_ip" "$REMOTE_HOST"
 }
 
 cmd_list() {

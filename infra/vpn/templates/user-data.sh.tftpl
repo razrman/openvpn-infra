@@ -22,7 +22,7 @@ echo "openvpn user-data: packages"
 installed=0
 attempt=1
 while [ "$attempt" -le 6 ]; do
-  if dnf install -y python3 openvpn amazon-cloudwatch-agent; then
+  if dnf install -y python3 openvpn iptables amazon-cloudwatch-agent; then
     installed=1
     break
   fi
@@ -58,6 +58,28 @@ ${server_conf}
 OPENVPN_SERVER_CONF_END
 chmod 0644 /etc/openvpn/server/server.conf
 
+%{ if peer_gonetlogo ~}
+cat > /usr/local/sbin/openvpn-nat <<'OPENVPN_NAT_SCRIPT_END'
+${nat_script}
+OPENVPN_NAT_SCRIPT_END
+chmod 0755 /usr/local/sbin/openvpn-nat
+
+cat > /etc/systemd/system/openvpn-nat.service <<'OPENVPN_NAT_UNIT_END'
+[Unit]
+Description=Masquerade VPN clients toward the peered GoNetLogo VPC
+After=network-online.target
+Before=openvpn-server@server.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/openvpn-nat ${vpn_cidr} ${gonetlogo_cidr}
+
+[Install]
+WantedBy=multi-user.target
+OPENVPN_NAT_UNIT_END
+%{ endif ~}
+
 cat > /etc/systemd/system/openvpn-sync.service <<'OPENVPN_SYNC_UNIT_END'
 ${sync_service}
 OPENVPN_SYNC_UNIT_END
@@ -77,6 +99,9 @@ echo "openvpn user-data: sync PKI"
 /usr/local/sbin/openvpn-sync
 
 systemctl daemon-reload
+%{ if peer_gonetlogo ~}
+systemctl enable --now openvpn-nat.service
+%{ endif ~}
 systemctl enable --now openvpn-server@server
 systemctl enable --now openvpn-sync.timer
 

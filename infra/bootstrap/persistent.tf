@@ -1,14 +1,9 @@
-# Address embedded in every client profile. It stays allocated when the
-# vpn stack is destroyed, so existing .ovpn files keep the same remote.
-# AWS bills a public IPv4 at $0.005 per hour whether or not it is
-# attached, about $3.65 a month. A DNS name would be cheaper and would
-# need a domain. The profile would then depend on that name resolving.
-resource "aws_eip" "vpn" {
-  domain = "vpc"
-
-  tags = {
-    Name = "openvpn"
-  }
+# GoNetLogo's bootstrap owns this zone. This stack only reads its id so
+# the deploy role can be scoped to it. Do not add an aws_route53_zone
+# resource here.
+data "aws_route53_zone" "app" {
+  name         = var.zone_name
+  private_zone = false
 }
 
 # Usage cost, with credits left out, so the alert still fires while

@@ -1,6 +1,6 @@
 variable "aws_region" {
   type        = string
-  description = "Region for the state bucket, the Elastic IP, and the vpn stack."
+  description = "Region for the state bucket and the vpn stack. Route 53 is global."
   default     = "us-west-2"
 }
 
@@ -29,8 +29,20 @@ variable "budget_email" {
 
 variable "budget_limit_usd" {
   type        = string
-  description = "Monthly cost alert threshold in USD, measured before credits. The running server is about $8. Torn down, the idle Elastic IP is about $4."
+  description = "Monthly cost alert threshold in USD, measured before credits. The running server is about $8. Torn down, this repo adds about nothing."
   default     = "10"
+}
+
+variable "zone_name" {
+  type        = string
+  description = "Existing public zone owned by GoNetLogo's bootstrap. This stack looks it up and does not create or delete it. The same name is the default in infra/vpn."
+  default     = "app.sapienexmachina.si"
+}
+
+variable "vpn_hostname" {
+  type        = string
+  description = "Only DNS name the deploy role may change in zone_name. The vpn stack writes the A record. The same default is in infra/vpn."
+  default     = "vpn.app.sapienexmachina.si"
 }
 
 variable "github_subjects" {

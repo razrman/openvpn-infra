@@ -1,5 +1,6 @@
-# Destroyable VPN stack: VPC, security group, EC2 instance, Elastic IP
-# association, and the log group. State is in the bucket from
+# Destroyable VPN stack: security group, EC2 instance in the default VPC,
+# its auto-assigned public address, the A record, optional peering, and
+# the log group. State is in the bucket from
 # infra/bootstrap, locked with OpenTofu's S3 lockfile (use_lockfile).
 # There is no DynamoDB table. The bucket name is a literal because a
 # backend block cannot interpolate.

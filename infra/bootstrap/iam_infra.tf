@@ -74,46 +74,35 @@ data "aws_iam_policy_document" "infra" {
     }
   }
 
-  # No AllocateAddress and no ReleaseAddress. The Elastic IP is created
-  # by this bootstrap stack. The vpn stack only associates it.
+  # The instance uses the default VPC and an auto-assigned public
+  # address. This role cannot create a VPC, a subnet, an internet
+  # gateway, a route table, or an Elastic IP. It can peer to the
+  # GoNetLogo VPC and add or remove the two CIDR routes for that peering.
   statement {
     sid    = "NetworkAndInstance"
     effect = "Allow"
     actions = [
-      "ec2:AssociateAddress",
-      "ec2:AssociateRouteTable",
-      "ec2:AttachInternetGateway",
+      "ec2:AcceptVpcPeeringConnection",
       "ec2:AuthorizeSecurityGroupEgress",
       "ec2:AuthorizeSecurityGroupIngress",
-      "ec2:CreateInternetGateway",
       "ec2:CreateNetworkInterface",
       "ec2:CreateRoute",
-      "ec2:CreateRouteTable",
       "ec2:CreateSecurityGroup",
-      "ec2:CreateSubnet",
       "ec2:CreateTags",
       "ec2:CreateVolume",
-      "ec2:CreateVpc",
-      "ec2:DeleteInternetGateway",
+      "ec2:CreateVpcPeeringConnection",
       "ec2:DeleteNetworkInterface",
       "ec2:DeleteRoute",
-      "ec2:DeleteRouteTable",
       "ec2:DeleteSecurityGroup",
-      "ec2:DeleteSubnet",
       "ec2:DeleteTags",
       "ec2:DeleteVolume",
-      "ec2:DeleteVpc",
+      "ec2:DeleteVpcPeeringConnection",
       "ec2:Describe*",
-      "ec2:DetachInternetGateway",
       "ec2:DetachNetworkInterface",
-      "ec2:DisassociateAddress",
-      "ec2:DisassociateRouteTable",
       "ec2:Get*",
       "ec2:ModifyInstanceAttribute",
       "ec2:ModifyNetworkInterfaceAttribute",
-      "ec2:ModifySubnetAttribute",
       "ec2:ModifyVolume",
-      "ec2:ModifyVpcAttribute",
       "ec2:RevokeSecurityGroupEgress",
       "ec2:RevokeSecurityGroupIngress",
       "ec2:RunInstances",
@@ -159,6 +148,66 @@ data "aws_iam_policy_document" "infra" {
       variable = "aws:RequestedRegion"
       values   = [var.aws_region]
     }
+  }
+
+  # Writes are limited to one A record in GoNetLogo's existing zone.
+  # The role cannot delete the zone or change any other name in it.
+  # NormalizedRecordNames is the lowercase name with no trailing dot.
+  statement {
+    sid     = "VpnDnsRecord"
+    effect  = "Allow"
+    actions = ["route53:ChangeResourceRecordSets"]
+    resources = [
+      data.aws_route53_zone.app.arn,
+    ]
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+      values   = [var.vpn_hostname]
+    }
+
+    condition {
+      test     = "ForAllValues:StringEquals"
+      variable = "route53:ChangeResourceRecordSetsRecordTypes"
+      values   = ["A"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "route53:ChangeResourceRecordSetsNormalizedRecordNames"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid    = "VpnDnsRead"
+    effect = "Allow"
+    actions = [
+      "route53:GetHostedZone",
+      "route53:ListResourceRecordSets",
+      "route53:ListTagsForResource",
+    ]
+    resources = [
+      data.aws_route53_zone.app.arn,
+    ]
+  }
+
+  statement {
+    sid    = "DnsList"
+    effect = "Allow"
+    actions = [
+      "route53:ListHostedZones",
+      "route53:ListHostedZonesByName",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "DnsGetChange"
+    effect    = "Allow"
+    actions   = ["route53:GetChange"]
+    resources = ["arn:aws:route53:::change/*"]
   }
 
   # Public SSM parameter that names the current Amazon Linux 2023 arm64 AMI.

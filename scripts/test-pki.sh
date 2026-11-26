@@ -145,6 +145,24 @@ grep -q 'VPN_PREFIX="10.8.0"' "$script" || fail "client script prefix drifted"
 grep -q 'openvpn-tfstate-457504029722' "$root/infra/bootstrap/variables.tf" || fail "state bucket name drifted"
 grep -q 'openvpn-tfstate-457504029722' "$root/infra/vpn/versions.tf" || fail "backend bucket name drifted"
 grep -q 'use_lockfile = true' "$root/infra/vpn/versions.tf" || fail "lockfile not enabled"
+grep -q 'vpc-02297ce9cfb0e105d' "$root/infra/vpn/variables.tf" || fail "default vpc id drifted"
+grep -q 'app.sapienexmachina.si' "$root/infra/bootstrap/variables.tf" || fail "zone name drifted"
+grep -q 'vpn.app.sapienexmachina.si' "$root/infra/vpn/variables.tf" || fail "record name drifted"
+grep -q 'ChangeResourceRecordSetsNormalizedRecordNames' "$root/infra/bootstrap/iam_infra.tf" || fail "dns condition missing"
+if grep -R --exclude-dir=.terraform 'resource "aws_route53_zone"' "$root/infra"; then
+  fail "this repo must not create a hosted zone"
+fi
+grep -q '10.20.0.0/16' "$root/infra/vpn/variables.tf" || fail "gonetlogo cidr drifted"
+if grep -R --exclude-dir=.terraform '^resource "aws_vpc"' "$root/infra/vpn"; then
+  fail "vpn stack must not create a VPC"
+fi
+if grep -R --exclude-dir=.terraform 'aws_eip' "$root/infra"; then
+  fail "Elastic IP should not be in this repo"
+fi
+grep -q 'MASQUERADE' "$root/infra/vpn/files/nat.sh" || fail "nat script missing masquerade"
+if grep -q '0.0.0.0/0' "$root/infra/vpn/files/nat.sh"; then
+  fail "nat script must not masquerade every destination"
+fi
 
 conf="$root/infra/vpn/templates/server.conf.tftpl"
 if grep -E '^[[:space:]]*(duplicate-cn|auth-user-pass|redirect-gateway)([[:space:]]|$)' "$conf"; then
@@ -193,12 +211,13 @@ printf '%s\n' "$list_out" | grep -qx 'windows-pc 10.8.0.10 active'
 bash "$script" show windows-pc --output "$tmp/windows-pc.ovpn" >"$tmp/show-win.out"
 bash "$script" show linux-box --output "$tmp/linux-box.ovpn" >/dev/null
 [ "$(stat -c %a "$tmp/windows-pc.ovpn")" = "600" ] || fail "ovpn mode"
-grep -q 'remote: 203.0.113.10' "$tmp/show-win.out" || fail "show remote"
+grep -q 'remote: vpn.app.sapienexmachina.si' "$tmp/show-win.out" || fail "show remote"
 
 assert_profile() {
   local file="$1"
   local cn="$2"
-  grep -q "^remote 203.0.113.10 1194$" "$file" || fail "$file remote"
+  grep -q "^remote vpn.app.sapienexmachina.si 1194 udp$" "$file" || fail "$file remote"
+  grep -q '^resolv-retry infinite$' "$file" || fail "$file resolv-retry"
   grep -q '^remote-cert-tls server$' "$file" || fail "$file remote-cert-tls"
   grep -q '^verify-x509-name openvpn-server name$' "$file" || fail "$file verify-x509-name"
   grep -q '^tls-version-min 1.2$' "$file" || fail "$file tls version"
