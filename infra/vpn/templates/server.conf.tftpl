@@ -40,8 +40,14 @@ data-ciphers AES-256-GCM:CHACHA20-POLY1305
 auth SHA256
 persist-key
 persist-tun
+# The Amazon Linux package creates /etc/openvpn/server as 0750 root:openvpn.
+# After the privilege drop the process must still be able to enter that
+# directory to read client-config-dir and the CRL. group openvpn can.
+# user-data switches the user to openvpn when that account exists, and
+# leaves nobody otherwise. nobody with group nobody cannot traverse the
+# directory, so clients fall through to the dynamic pool.
 user nobody
-group nobody
+group openvpn
 status /var/log/openvpn/status.log 30
 status-version 2
 log-append /var/log/openvpn/server.log
