@@ -1,0 +1,15 @@
+# OpenTofu. Bootstrap state stays on the machine that applied it.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Client profiles and anything the PKI script writes. Never commit these.
+clients/
+*.ovpn
