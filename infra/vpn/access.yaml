@@ -4,7 +4,8 @@
 # is every active static client (10.8.0.10-199). gonetlogo is
 # 10.20.0.0/16. The dynamic pool 10.8.0.200-249 is never included.
 # Absence of a rule is the deny: windows-pc and mac-mini have no path
-# to linux-box.
+# to linux-box. vpn-server is the tunnel address 10.8.0.1 (INPUT, not
+# FORWARD). Port 22 is not open on the public interface.
 rules:
   - from: linux-box
     to: windows-pc
@@ -18,3 +19,11 @@ rules:
     to: gonetlogo
     proto: tcp
     port: 8080
+  - from: desktop-crnncuc
+    to: vpn-server
+    proto: tcp
+    port: 22
+  - from: linux-box
+    to: vpn-server
+    proto: tcp
+    port: 22

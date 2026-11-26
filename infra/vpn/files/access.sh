@@ -25,5 +25,10 @@ fi
 if ! iptables -C FORWARD -o tun+ ! -i tun+ -j OPENVPN_FWD 2>/dev/null; then
   iptables -A FORWARD -o tun+ ! -i tun+ -j OPENVPN_FWD
 fi
+# TCP 22 on the tunnel only. The public interface is not in this jump,
+# and the security group does not allow 22.
+if ! iptables -C INPUT -i tun+ -p tcp --dport 22 -j OPENVPN_IN 2>/dev/null; then
+  iptables -A INPUT -i tun+ -p tcp --dport 22 -j OPENVPN_IN
+fi
 
-echo "openvpn-access: forward policy installed" >&2
+echo "openvpn-access: forward and ssh policy installed" >&2

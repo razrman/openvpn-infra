@@ -103,6 +103,12 @@ variable "gonetlogo_cidr" {
   }
 }
 
+variable "ssh_authorized_keys" {
+  type        = string
+  description = "OpenSSH public keys for ec2-user, one per line. Empty leaves sshd unchanged. Infra up and Infra plan pass the VPN_SSH_AUTHORIZED_KEYS repository variable. Do not commit a private key."
+  default     = ""
+}
+
 variable "log_retention_days" {
   type        = number
   description = "CloudWatch retention for /openvpn/server. The log group is destroyed with this stack."
