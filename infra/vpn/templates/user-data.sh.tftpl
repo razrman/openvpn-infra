@@ -1,0 +1,112 @@
+#!/bin/bash
+# Install OpenVPN and pull the PKI from SSM. Certificates are not in this
+# file. A failure here leaves Session Manager up so the cloud-init log
+# can be read without SSH.
+set -euo pipefail
+umask 022
+
+echo "openvpn user-data: swap"
+if ! swapon --show | grep -q /swapfile; then
+  if ! fallocate -l 1G /swapfile; then
+    dd if=/dev/zero of=/swapfile bs=1M count=1024
+  fi
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  if ! grep -q /swapfile /etc/fstab; then
+    echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+fi
+
+echo "openvpn user-data: packages"
+installed=0
+attempt=1
+while [ "$attempt" -le 6 ]; do
+  if dnf install -y python3 openvpn iptables amazon-cloudwatch-agent; then
+    installed=1
+    break
+  fi
+  echo "openvpn user-data: dnf failed, retry $attempt" >&2
+  attempt=$((attempt + 1))
+  sleep 10
+done
+if [ "$installed" -ne 1 ]; then
+  echo "openvpn user-data: package install failed" >&2
+  exit 1
+fi
+
+if ! getent passwd nobody >/dev/null || ! getent group nobody >/dev/null; then
+  echo "openvpn user-data: the nobody user and group are required" >&2
+  exit 1
+fi
+
+if ! systemctl cat openvpn-server@.service >/dev/null 2>&1; then
+  echo "openvpn user-data: openvpn-server@.service is missing" >&2
+  systemctl list-unit-files '*openvpn*' >&2 || true
+  exit 1
+fi
+
+install -d -m 0755 /etc/openvpn/server/ccd /var/log/openvpn /usr/local/sbin /etc/systemd/system /opt/aws/amazon-cloudwatch-agent/etc
+
+cat > /usr/local/sbin/openvpn-sync <<'OPENVPN_SYNC_SCRIPT_END'
+${sync_script}
+OPENVPN_SYNC_SCRIPT_END
+chmod 0755 /usr/local/sbin/openvpn-sync
+
+cat > /etc/openvpn/server/server.conf <<'OPENVPN_SERVER_CONF_END'
+${server_conf}
+OPENVPN_SERVER_CONF_END
+chmod 0644 /etc/openvpn/server/server.conf
+
+%{ if peer_gonetlogo ~}
+cat > /usr/local/sbin/openvpn-nat <<'OPENVPN_NAT_SCRIPT_END'
+${nat_script}
+OPENVPN_NAT_SCRIPT_END
+chmod 0755 /usr/local/sbin/openvpn-nat
+
+cat > /etc/systemd/system/openvpn-nat.service <<'OPENVPN_NAT_UNIT_END'
+[Unit]
+Description=Masquerade VPN clients toward the peered GoNetLogo VPC
+After=network-online.target
+Before=openvpn-server@server.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/openvpn-nat ${vpn_cidr} ${gonetlogo_cidr}
+
+[Install]
+WantedBy=multi-user.target
+OPENVPN_NAT_UNIT_END
+%{ endif ~}
+
+cat > /etc/systemd/system/openvpn-sync.service <<'OPENVPN_SYNC_UNIT_END'
+${sync_service}
+OPENVPN_SYNC_UNIT_END
+
+cat > /etc/systemd/system/openvpn-sync.timer <<'OPENVPN_SYNC_TIMER_END'
+${sync_timer}
+OPENVPN_SYNC_TIMER_END
+
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'OPENVPN_CWAGENT_END'
+${cwagent_json}
+OPENVPN_CWAGENT_END
+
+touch /var/log/openvpn/server.log
+chmod 0644 /var/log/openvpn/server.log
+
+echo "openvpn user-data: sync PKI"
+/usr/local/sbin/openvpn-sync
+
+systemctl daemon-reload
+%{ if peer_gonetlogo ~}
+systemctl enable --now openvpn-nat.service
+%{ endif ~}
+systemctl enable --now openvpn-server@server
+systemctl enable --now openvpn-sync.timer
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 -s \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+echo "openvpn user-data: done"

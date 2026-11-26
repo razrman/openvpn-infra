@@ -1,0 +1,8 @@
+[Unit]
+Description=Pull OpenVPN PKI and client addresses from SSM
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/openvpn-sync

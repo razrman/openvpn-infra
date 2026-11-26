@@ -1,0 +1,49 @@
+# One certificate per client. duplicate-cn is intentionally absent, so a
+# second session with the same certificate is rejected. There is no
+# auth-user-pass and no username-as-common-name. Authentication is the
+# client certificate (remote-cert-tls client requires the clientAuth EKU).
+# The CRL drops a single client without touching the others.
+#
+# client-to-client routes VPN-to-VPN traffic inside OpenVPN. Nothing here
+# pushes redirect-gateway. When peering is on, clients also learn the
+# GoNetLogo CIDR. The host masquerades only that CIDR; it is not a
+# default-route NAT.
+port 1194
+proto udp
+dev tun
+topology subnet
+mode server
+tls-server
+ifconfig ${server_ip} ${vpn_netmask}
+ifconfig-pool ${pool_start} ${pool_end} ${vpn_netmask}
+push "topology subnet"
+push "route-gateway ${server_ip}"
+push "route ${vpn_network} ${vpn_netmask}"
+%{ if peer_gonetlogo ~}
+push "route ${gonetlogo_network} ${gonetlogo_netmask}"
+%{ endif ~}
+client-config-dir /etc/openvpn/server/ccd
+client-to-client
+keepalive 10 120
+ca /etc/openvpn/server/ca.crt
+cert /etc/openvpn/server/server.crt
+key /etc/openvpn/server/server.key
+tls-crypt /etc/openvpn/server/tls-crypt.key
+crl-verify /etc/openvpn/server/crl.pem
+remote-cert-tls client
+verify-client-cert require
+dh none
+tls-groups prime256v1
+tls-version-min 1.2
+tls-cert-profile preferred
+data-ciphers AES-256-GCM:CHACHA20-POLY1305
+auth SHA256
+persist-key
+persist-tun
+user nobody
+group nobody
+status /var/log/openvpn/status.log 30
+status-version 2
+log-append /var/log/openvpn/server.log
+verb 3
+explicit-exit-notify 1

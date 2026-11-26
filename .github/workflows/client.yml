@@ -1,0 +1,84 @@
+# Issue or revoke one client certificate. The profile is not printed and
+# is not uploaded as an artifact. Download it on an admin shell with
+# scripts/openvpn-client.sh show. init is local only, so the CA key is
+# not generated on a runner. The production environment is the approval
+# gate. The PKI lock in SSM covers a local run that overlaps this job.
+
+name: VPN client
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "add issues a new certificate. revoke puts that certificate on the CRL."
+        required: true
+        type: choice
+        options:
+          - add
+          - revoke
+      name:
+        description: "Client name. Lowercase, starts with a letter. Example: windows-pc"
+        required: true
+        type: string
+      ip:
+        description: "Optional static VPN IP (10.8.0.10-10.8.0.199). Empty uses the next free address, or the address already reserved for this name."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openvpn-pki
+  cancel-in-progress: false
+
+jobs:
+  client:
+    name: ${{ inputs.action }} client
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check deploy role variable
+        env:
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ROLE_ARN" ]; then
+            echo "Set the repository variable AWS_DEPLOY_ROLE_ARN to the deploy_role_arn output from infra/bootstrap." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: openvpn-client
+
+      - name: Add or revoke
+        env:
+          CLIENT_ACTION: ${{ inputs.action }}
+          CLIENT_NAME: ${{ inputs.name }}
+          CLIENT_IP: ${{ inputs.ip }}
+        run: |
+          set -euo pipefail
+          case "$CLIENT_ACTION" in
+            add|revoke) ;;
+            *)
+              echo "action must be add or revoke" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$CLIENT_ACTION" = "add" ] && [ -n "$CLIENT_IP" ]; then
+            bash scripts/openvpn-client.sh add "$CLIENT_NAME" --ip "$CLIENT_IP"
+          else
+            bash scripts/openvpn-client.sh "$CLIENT_ACTION" "$CLIENT_NAME"
+          fi
