@@ -176,6 +176,12 @@ grep -q '^client-to-client$' "$conf" || fail "server missing client-to-client"
 grep -q '^tls-version-min 1.2$' "$conf" || fail "server missing TLS 1.2 floor"
 grep -q '^data-ciphers AES-256-GCM:CHACHA20-POLY1305$' "$conf" || fail "server ciphers drifted"
 grep -q '^auth SHA256$' "$conf" || fail "server auth drifted"
+grep -q '^group openvpn$' "$conf" || fail "server must drop to group openvpn"
+if grep -q '^group nobody$' "$conf"; then
+  fail "group nobody cannot enter /etc/openvpn/server"
+fi
+grep -q 'getent passwd openvpn' "$root/infra/vpn/templates/user-data.sh.tftpl" || fail "user-data should prefer the openvpn user"
+grep -q 'root:openvpn' "$sync" || fail "sync must restore root:openvpn ownership"
 
 if grep -RIn --exclude-dir=.git --exclude-dir=.terraform --exclude=test-pki.sh -E 'WSL|wsl' "$root"; then
   fail "WSL should not be mentioned"
@@ -266,12 +272,17 @@ PY
 export OPENVPN_SYNC_REGION="us-west-2"
 export OPENVPN_SYNC_DEST="$tmp/server"
 export OPENVPN_SYNC_NO_SYSTEMCTL="1"
+export OPENVPN_SYNC_SKIP_CHOWN="1"
 bash "$sync"
 grep -q '^ifconfig-push 10.8.0.10 255.255.255.0$' "$tmp/server/ccd/windows-pc" || fail "windows CCD"
 grep -q '^ifconfig-push 10.8.0.11 255.255.255.0$' "$tmp/server/ccd/linux-box" || fail "linux CCD"
+[ "$(stat -c %a "$tmp/server")" = "750" ] || fail "server dir mode"
+[ "$(stat -c %a "$tmp/server/ccd")" = "750" ] || fail "ccd dir mode"
+[ "$(stat -c %a "$tmp/server/ccd/windows-pc")" = "640" ] || fail "ccd file mode"
 [ "$(stat -c %a "$tmp/server/server.key")" = "600" ] || fail "server key mode"
-[ "$(stat -c %a "$tmp/server/ca.crt")" = "644" ] || fail "ca cert mode"
-[ "$(stat -c %a "$tmp/server/crl.pem")" = "644" ] || fail "crl mode"
+[ "$(stat -c %a "$tmp/server/tls-crypt.key")" = "600" ] || fail "tls-crypt mode"
+[ "$(stat -c %a "$tmp/server/ca.crt")" = "640" ] || fail "ca cert mode"
+[ "$(stat -c %a "$tmp/server/crl.pem")" = "640" ] || fail "crl mode"
 
 bash "$script" revoke windows-pc >"$tmp/revoke.out"
 grep -q 'status: revoked' "$tmp/revoke.out" || fail "revoke status"

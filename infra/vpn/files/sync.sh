@@ -32,9 +32,32 @@ fi
 export AWS_DEFAULT_REGION="$region"
 
 work="$(mktemp -d)"
+
+# OpenVPN drops to group openvpn and then re-reads the CRL and the
+# client-config directory on every connection. /etc/openvpn/server is
+# 0750 root:openvpn, so that group can enter it and nobody cannot.
+# Private keys stay 0600 root and are read only before the drop
+# (persist-key). Re-apply these modes on every run.
+own() {
+  local owner="$1"
+  local mode="$2"
+  local path="$3"
+  chmod "$mode" "$path"
+  if [ -n "${OPENVPN_SYNC_SKIP_CHOWN:-}" ]; then
+    return 0
+  fi
+  if [ "$owner" = "root:openvpn" ] && ! getent group openvpn >/dev/null 2>&1; then
+    echo "openvpn-sync: group openvpn is missing" >&2
+    exit 1
+  fi
+  chown "$owner" "$path"
+}
+
 # The log directory is created by user-data. Sync only needs the config tree,
 # so a test can point OPENVPN_SYNC_DEST at a writable directory.
-install -d -m 0755 "$dest/ccd"
+install -d -m 0750 "$dest/ccd"
+own root:openvpn 0750 "$dest"
+own root:openvpn 0750 "$dest/ccd"
 
 fetch() {
   local path="$1"
@@ -124,15 +147,22 @@ for file in ca.crt server.crt server.key tls-crypt.key crl.pem; do
   fi
 done
 
-install -m 0644 "$out/ca.crt" "$dest/ca.crt"
-install -m 0644 "$out/server.crt" "$dest/server.crt"
+install -m 0640 "$out/ca.crt" "$dest/ca.crt"
+install -m 0640 "$out/server.crt" "$dest/server.crt"
 install -m 0600 "$out/server.key" "$dest/server.key"
 install -m 0600 "$out/tls-crypt.key" "$dest/tls-crypt.key"
-install -m 0644 "$out/crl.pem" "$dest/crl.pem"
+install -m 0640 "$out/crl.pem" "$dest/crl.pem"
+own root:openvpn 0640 "$dest/ca.crt"
+own root:openvpn 0640 "$dest/server.crt"
+own root:root 0600 "$dest/server.key"
+own root:root 0600 "$dest/tls-crypt.key"
+own root:openvpn 0640 "$dest/crl.pem"
 
 shopt -s nullglob
 for file in "$out/ccd"/*; do
-  install -m 0644 "$file" "$dest/ccd/$(basename "$file")"
+  installed="$dest/ccd/$(basename "$file")"
+  install -m 0640 "$file" "$installed"
+  own root:openvpn 0640 "$installed"
 done
 for existing in "$dest/ccd"/*; do
   base="$(basename "$existing")"
