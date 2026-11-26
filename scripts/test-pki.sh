@@ -172,7 +172,9 @@ grep -q '^remote-cert-tls client$' "$conf" || fail "server missing remote-cert-t
 grep -q '^verify-client-cert require$' "$conf" || fail "server missing verify-client-cert"
 grep -q '^crl-verify /etc/openvpn/server/crl.pem$' "$conf" || fail "server missing CRL"
 grep -q '^tls-crypt /etc/openvpn/server/tls-crypt.key$' "$conf" || fail "server missing tls-crypt"
-grep -q '^client-to-client$' "$conf" || fail "server missing client-to-client"
+if grep -q '^client-to-client$' "$conf"; then
+  fail "client-to-client bypasses the forward allowlist"
+fi
 grep -q '^tls-version-min 1.2$' "$conf" || fail "server missing TLS 1.2 floor"
 grep -q '^data-ciphers AES-256-GCM:CHACHA20-POLY1305$' "$conf" || fail "server ciphers drifted"
 grep -q '^auth SHA256$' "$conf" || fail "server auth drifted"
@@ -273,6 +275,7 @@ export OPENVPN_SYNC_REGION="us-west-2"
 export OPENVPN_SYNC_DEST="$tmp/server"
 export OPENVPN_SYNC_NO_SYSTEMCTL="1"
 export OPENVPN_SYNC_SKIP_CHOWN="1"
+export OPENVPN_SYNC_SKIP_FIREWALL="1"
 bash "$sync"
 grep -q '^ifconfig-push 10.8.0.10 255.255.255.0$' "$tmp/server/ccd/windows-pc" || fail "windows CCD"
 grep -q '^ifconfig-push 10.8.0.11 255.255.255.0$' "$tmp/server/ccd/linux-box" || fail "linux CCD"

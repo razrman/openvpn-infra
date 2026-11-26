@@ -4,10 +4,11 @@
 # client certificate (remote-cert-tls client requires the clientAuth EKU).
 # The CRL drops a single client without touching the others.
 #
-# client-to-client routes VPN-to-VPN traffic inside OpenVPN. Nothing here
-# pushes redirect-gateway. When peering is on, clients also learn the
-# GoNetLogo CIDR. The host masquerades only that CIDR; it is not a
-# default-route NAT.
+# There is no client-to-client directive. Traffic between clients, and
+# from clients into the peered VPC, is forwarded by the kernel so
+# iptables can default-deny it. Nothing here pushes redirect-gateway.
+# When peering is on, clients also learn the GoNetLogo CIDR. The host
+# masquerades only that CIDR; it is not a default-route NAT.
 port 1194
 proto udp
 dev tun
@@ -23,7 +24,6 @@ push "route ${vpn_network} ${vpn_netmask}"
 push "route ${gonetlogo_network} ${gonetlogo_netmask}"
 %{ endif ~}
 client-config-dir /etc/openvpn/server/ccd
-client-to-client
 keepalive 10 120
 ca /etc/openvpn/server/ca.crt
 cert /etc/openvpn/server/server.crt

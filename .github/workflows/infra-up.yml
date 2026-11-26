@@ -53,6 +53,19 @@ jobs:
           tofu_version_file: infra/.opentofu-version
           tofu_wrapper: false
 
+      - name: Resolve UDP 1194 allowlist
+        env:
+          VPN_ALLOWED_CIDRS: ${{ vars.VPN_ALLOWED_CIDRS }}
+        run: |
+          set -euo pipefail
+          json="$(bash scripts/allowed-cidrs.sh)"
+          echo "UDP 1194 allowlist: $json"
+          {
+            echo "TF_VAR_allowed_cidrs<<EOF"
+            echo "$json"
+            echo "EOF"
+          } >>"$GITHUB_ENV"
+
       - name: Apply
         working-directory: infra/vpn
         run: |

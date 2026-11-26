@@ -17,26 +17,7 @@ resource "aws_instance" "vpn" {
   associate_public_ip_address = true
   source_dest_check           = true
 
-  user_data = templatefile("${path.module}/templates/user-data.sh.tftpl", {
-    sync_script = file("${path.module}/files/sync.sh")
-    nat_script  = file("${path.module}/files/nat.sh")
-    server_conf = templatefile("${path.module}/templates/server.conf.tftpl", {
-      vpn_network       = local.vpn_network
-      vpn_netmask       = local.vpn_netmask
-      server_ip         = local.server_ip
-      pool_start        = local.pool_start
-      pool_end          = local.pool_end
-      peer_gonetlogo    = var.peer_gonetlogo
-      gonetlogo_network = local.gonetlogo_network
-      gonetlogo_netmask = local.gonetlogo_netmask
-    })
-    sync_service   = file("${path.module}/files/openvpn-sync.service")
-    sync_timer     = file("${path.module}/files/openvpn-sync.timer")
-    cwagent_json   = file("${path.module}/files/amazon-cloudwatch-agent.json")
-    peer_gonetlogo = var.peer_gonetlogo
-    vpn_cidr       = var.vpn_cidr
-    gonetlogo_cidr = var.gonetlogo_cidr
-  })
+  user_data                   = local.user_data
   user_data_replace_on_change = true
 
   metadata_options {
@@ -64,6 +45,11 @@ resource "aws_instance" "vpn" {
   # up. The next create, after a destroy, reads the parameter again.
   lifecycle {
     ignore_changes = [ami]
+
+    precondition {
+      condition     = length(local.user_data) <= 16384
+      error_message = "user-data is ${length(local.user_data)} bytes. EC2 accepts 16384."
+    }
   }
 
   depends_on = [aws_cloudwatch_log_group.vpn]

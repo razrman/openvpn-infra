@@ -1,0 +1,20 @@
+# New connections across the tunnel. Anything not listed is dropped.
+# Return traffic and an ICMP echo in the same direction are added for
+# each rule. Client names are the OpenVPN certificate names. any-client
+# is every active static client (10.8.0.10-199). gonetlogo is
+# 10.20.0.0/16. The dynamic pool 10.8.0.200-249 is never included.
+# Absence of a rule is the deny: windows-pc and mac-mini have no path
+# to linux-box.
+rules:
+  - from: linux-box
+    to: windows-pc
+    proto: tcp
+    port: 1337
+  - from: linux-box
+    to: mac-mini
+    proto: tcp
+    port: 1337
+  - from: any-client
+    to: gonetlogo
+    proto: tcp
+    port: 8080

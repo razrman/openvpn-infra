@@ -137,6 +137,10 @@ for client, ip in sorted(ips.items()):
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("ifconfig-push %s 255.255.255.0\n" % ip)
     os.chmod(path, 0o644)
+
+with open(os.path.join(work, "active.json"), "w", encoding="utf-8") as handle:
+    json.dump({name: ips[name] for name in sorted(ips) if status.get(name) == "active" and ips.get(name)}, handle)
+    handle.write("\n")
 PY
 
 out="$work/out"
@@ -179,6 +183,10 @@ for file in "$dest/ccd"/*; do
 done
 shopt -u nullglob
 echo "openvpn-sync: installed $count client address(es)" >&2
+
+if [ -z "${OPENVPN_SYNC_SKIP_FIREWALL:-}" ]; then
+  /usr/local/sbin/openvpn-access "$work/active.json"
+fi
 
 if [ "$need_restart" -eq 1 ] && [ -z "${OPENVPN_SYNC_NO_SYSTEMCTL:-}" ]; then
   if systemctl is-active --quiet openvpn-server@server; then
