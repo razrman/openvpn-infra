@@ -11,6 +11,8 @@
 # masquerades only that CIDR; it is not a default-route NAT.
 port 1194
 proto udp
+# Bind every address. The public IPv4 is an Elastic IP associated outside
+# this process, and profiles use the DNS name, so this file has no public IP.
 dev tun
 topology subnet
 mode server

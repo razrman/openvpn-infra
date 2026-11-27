@@ -10,10 +10,11 @@ resource "aws_instance" "vpn" {
   vpc_security_group_ids = [aws_security_group.vpn.id]
   iam_instance_profile   = aws_iam_instance_profile.instance.name
 
-  # Auto-assigned public address. It is released when the instance is
-  # destroyed, so there is no idle public IPv4. Clients use the DNS name.
-  # Source/dest check stays on: tunnel traffic into the peered VPC is
-  # masqueraded to this instance's own address.
+  # The subnet assigns a public address at launch. aws_eip_association
+  # replaces that address with the Elastic IP from bootstrap without
+  # replacing this instance. Turning this flag off is ForceNew, so it
+  # stays on. Source/dest check stays on: tunnel traffic into the peered
+  # VPC is masqueraded to this instance's own address.
   associate_public_ip_address = true
   source_dest_check           = true
 

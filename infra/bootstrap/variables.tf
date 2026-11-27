@@ -29,7 +29,7 @@ variable "budget_email" {
 
 variable "budget_limit_usd" {
   type        = string
-  description = "Monthly cost alert threshold in USD, measured before credits. The running server is about $8. Torn down, this repo adds about nothing."
+  description = "Monthly cost alert threshold in USD, measured before credits. The running server is about $8. Torn down, the Elastic IP is still about $3.60 a month until it is released."
   default     = "10"
 }
 

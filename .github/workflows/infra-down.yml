@@ -1,5 +1,6 @@
 # Destroy the VPN stack and leave the persistent pieces in place:
-# state bucket, deploy role, Elastic IP, budget, and the PKI in SSM.
+# state bucket, deploy role, Elastic IP allocation, budget, and the PKI
+# in SSM. The association is removed. The address is not released.
 # Type destroy in the confirm box. The production environment is the
 # approval gate.
 

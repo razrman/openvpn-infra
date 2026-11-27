@@ -42,3 +42,13 @@ output "budget_name" {
   description = "Monthly budget. The first two budgets in the account are free."
   value       = aws_budgets_budget.monthly.name
 }
+
+output "eip_allocation_id" {
+  description = "Elastic IP allocation id. The same value is stored at /openvpn/network/eip-allocation-id for infra/vpn. Releasing the address is a destroy of aws_eip.vpn after Infra down."
+  value       = aws_eip.vpn.id
+}
+
+output "eip_public_ip" {
+  description = "Stable public IPv4. The A record points vpn_hostname at it. Infra down does not change this address."
+  value       = aws_eip.vpn.public_ip
+}
