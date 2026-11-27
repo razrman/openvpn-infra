@@ -156,9 +156,25 @@ grep -q '10.20.0.0/16' "$root/infra/vpn/variables.tf" || fail "gonetlogo cidr dr
 if grep -R --exclude-dir=.terraform '^resource "aws_vpc"' "$root/infra/vpn"; then
   fail "vpn stack must not create a VPC"
 fi
-if grep -R --exclude-dir=.terraform 'aws_eip' "$root/infra"; then
-  fail "Elastic IP should not be in this repo"
+if grep -R --exclude-dir=.terraform 'resource "aws_eip"' "$root/infra/vpn"; then
+  fail "the vpn stack must not allocate an Elastic IP; Infra down would release it"
 fi
+grep -q 'resource "aws_eip" "vpn"' "$root/infra/bootstrap/eip.tf" || fail "bootstrap must allocate the Elastic IP"
+grep -q 'domain               = "vpc"' "$root/infra/bootstrap/eip.tf" || grep -q 'domain = "vpc"' "$root/infra/bootstrap/eip.tf" || fail "Elastic IP must be a VPC address"
+grep -q 'project = "openvpn"' "$root/infra/bootstrap/eip.tf" || fail "Elastic IP must be tagged project=openvpn"
+grep -q '/openvpn/network/eip-allocation-id' "$root/infra/bootstrap/eip.tf" || fail "allocation id must be published in SSM"
+grep -q 'resource "aws_eip_association" "vpn"' "$root/infra/vpn/eip.tf" || fail "vpn stack must associate the Elastic IP"
+grep -q 'data.aws_eip.vpn.public_ip' "$root/infra/vpn/dns.tf" || fail "A record must point at the Elastic IP"
+grep -q 'aws_eip_association.vpn' "$root/infra/vpn/dns.tf" || fail "A record must wait for the association"
+grep -q 'ec2:AssociateAddress' "$root/infra/bootstrap/iam_infra.tf" || fail "deploy role cannot associate the Elastic IP"
+grep -q 'ec2:DisassociateAddress' "$root/infra/bootstrap/iam_infra.tf" || fail "deploy role cannot disassociate the Elastic IP"
+if grep -R --exclude-dir=.terraform -q 'ec2:ReleaseAddress' "$root/infra"; then
+  fail "the deploy role must not be able to release the Elastic IP"
+fi
+if grep -q 'ec2:AllocateAddress' "$root/infra/bootstrap/iam_infra.tf"; then
+  fail "the deploy role must not be able to allocate an Elastic IP"
+fi
+grep -q 'REMOTE_HOST="vpn.app.sapienexmachina.si"' "$script" || fail "client profiles must keep using the hostname"
 grep -q 'MASQUERADE' "$root/infra/vpn/files/nat.sh" || fail "nat script missing masquerade"
 if grep -q '0.0.0.0/0' "$root/infra/vpn/files/nat.sh"; then
   fail "nat script must not masquerade every destination"

@@ -8,7 +8,7 @@ Account `457504029722`, region `us-west-2`. OpenTofu `1.13.9` (the pin is `infra
 
 This repository is public. Client profiles and `infra/bootstrap/terraform.tfstate` are secret. Both are gitignored. Do not paste a profile into an Actions log, a pull request, or a chat.
 
-**What changed.** The next Infra up replaces the instance. SSH to the VPN server is `ssh ec2-user@10.8.0.1`, and only from a tunnel client named in `access.yaml` (`desktop-crnncuc` and `linux-box`). sshd listens on `10.8.0.1` only, and only after `VPN_SSH_AUTHORIZED_KEYS` holds a public key. Port 22 is not in the security group. Leave that variable empty and sshd is unchanged.
+**What changed.** The public address is an Elastic IP from `infra/bootstrap`. It stays the same across Infra up, instance replacement, and Infra down. Re-apply bootstrap from an administrator shell before the next Infra up. That first Infra up attaches the address, so the current instance's public IP changes once, and `vpn.app.sapienexmachina.si` follows it. Existing profiles use that hostname and do not change. SSH to the server is still `ssh ec2-user@10.8.0.1` from a tunnel client named in `access.yaml`.
 
 ## Certificates and trust
 
@@ -27,8 +27,8 @@ The CA lasts 10 years. Server and client certificates last 5 years. There is no 
 
 | Stack | State | Survives teardown |
 | --- | --- | --- |
-| `infra/bootstrap` | Local file on the machine that applied it | Yes. State bucket, deploy role, monthly budget. It looks up GoNetLogo's existing DNS zone and does not create one |
-| `infra/vpn` | S3 bucket from bootstrap, locked with an S3 lockfile (`use_lockfile`, no DynamoDB) | No. Security group, instance in the default VPC, A record, optional peering and its routes, log group |
+| `infra/bootstrap` | Local file on the machine that applied it | Yes. State bucket, deploy role, monthly budget, Elastic IP. It looks up GoNetLogo's existing DNS zone and does not create one |
+| `infra/vpn` | S3 bucket from bootstrap, locked with an S3 lockfile (`use_lockfile`, no DynamoDB) | No. Security group, instance in the default VPC, the Elastic IP association, A record, optional peering and its routes, log group |
 
 The PKI is not in either state. `scripts/openvpn-client.sh` stores it in SSM Parameter Store as Standard SecureString parameters (the free tier). Secrets Manager would be about $0.40 per secret per month, and a client needs several secrets. Standard parameters are limited to 4096 bytes, which covers these EC certificates, the tls-crypt key, and a CRL for a small number of clients.
 
@@ -52,32 +52,32 @@ Traffic between VPN clients, and from clients into the peered VPC, is forwarded 
 | `10.8.0.200`–`10.8.0.249` | Dynamic fallback only, if a certificate connects before its CCD file exists |
 | `172.31.0.0/16` | Account default VPC `vpc-02297ce9cfb0e105d`. The instance lives in the `us-west-2a` subnet. This stack does not create the VPC. Clients are not given a route to it |
 | `10.20.0.0/16` | GoNetLogo VPC, when that stack is up. Pushed to clients. Does not overlap the default VPC or the tunnel |
-| `vpn.app.sapienexmachina.si` | Server name in the existing zone `app.sapienexmachina.si`. The A record's TTL is 60 seconds |
+| `vpn.app.sapienexmachina.si` | Server name in the existing zone `app.sapienexmachina.si`. The A record's TTL is 60 seconds and it points at the Elastic IP |
 
 The home LAN must not be `10.8.0.0/24`. If it is, change `vpn_cidr` in `infra/vpn/variables.tf` and `VPN_PREFIX` in `scripts/openvpn-client.sh` together, and do that before you add a client. The script is the piece that picks static addresses.
 
 Who may send UDP 1194 is `allowed_cidrs`, and on Infra up that value comes from the `VPN_ALLOWED_CIDRS` repository variable. The details are under Allowlists. This stack does not add IPv6 rules.
 
-Profiles say `remote vpn.app.sapienexmachina.si 1194 udp` and `resolv-retry infinite`. They do not contain the instance's public address, so a rebuild does not require a new `.ovpn`. GoDaddy is not edited. The zone already exists for GoNetLogo.
+Profiles say `remote vpn.app.sapienexmachina.si 1194 udp` and `resolv-retry infinite`. They do not contain the public address, so attaching the Elastic IP or replacing the instance does not require a new `.ovpn`. The server config does not bind a public address either. GoDaddy is not edited. The zone already exists for GoNetLogo.
 
 ## Cost
 
 List-price sketch for `us-west-2`, 730 hours in a month. Not a bill.
 
-**Torn down** (bootstrap only, PKI sitting in SSM): about **$0** from this repo.
+**Torn down** (bootstrap left in place, including the Elastic IP, PKI sitting in SSM): about **$3.60 a month**.
 
-There is no Elastic IP and no hosted zone here. The public address exists only while the instance exists, and the name `vpn.app.sapienexmachina.si` is one A record in the zone GoNetLogo already pays for (`app.sapienexmachina.si`, about $0.50 a month on that other stack). S3 state and SSM standard parameters are cents or free. The budget, if it is one of the account's first two, is free.
+The Elastic IP is the charge. A public IPv4 is about $0.005 per hour, about $3.60 a month, whether or not an instance is attached. Infra down leaves the allocation in place so the address does not change. Releasing it, which is a separate bootstrap destroy described under Full teardown, drops that charge to zero. There is no hosted zone in this repo. The name `vpn.app.sapienexmachina.si` is one A record in the zone GoNetLogo already pays for (`app.sapienexmachina.si`, about $0.50 a month on that other stack). S3 state and SSM standard parameters are cents or free. The budget, if it is one of the account's first two, is free.
 
 **Running** (`t4g.nano`, the default): about **$8 a month**.
 
 | Piece | About |
 | --- | --- |
 | `t4g.nano` | $3.07 |
-| Public IPv4 on the instance, $0.005 per hour, only while it is running | $3.65 |
+| Public IPv4, the Elastic IP, $0.005 per hour, about $3.60 a month | $3.60 |
 | 8 GB gp3 root volume | $0.64 |
 | CloudWatch logs at this size, data transfer for API calls, the A record queries | well under $1 |
 
-The address is the one the default subnet assigns at launch. An Elastic IP created and destroyed with the instance would cost the same while running and nothing while destroyed. The auto-assigned address is the same bill with one less resource, and Infra down releases it. Clients keep using the DNS name. After a rebuild, wait out the 60 second TTL.
+While the server is running, the Elastic IP replaces the address the subnet would have assigned. It is one public IPv4, not a second one. The same $0.005 per hour continues after Infra down until you release the allocation. Clients keep using the DNS name. A rebuild does not change that address.
 
 The instance uses the existing default VPC, so there is no second VPC and no NAT gateway. Peering has no hourly charge. Traffic that stays in one availability zone is free. Traffic that crosses availability zones over the peering connection is about $0.01 per GB each way.
 
@@ -95,7 +95,14 @@ tofu init
 tofu apply
 ```
 
-Keep `terraform.tfstate` from that directory somewhere private. It is gitignored. It is the record of the bucket, the role, and the budget. Do not delete it.
+Keep `terraform.tfstate` from that directory somewhere private. It is gitignored. It is the record of the bucket, the role, the budget, and the Elastic IP. Do not delete it.
+
+That apply allocates the Elastic IP and writes its allocation id to the SSM parameter `/openvpn/network/eip-allocation-id`. The address is tagged `project=openvpn` and `Name=openvpn`, and the provider also tags it `Project=openvpn`. If bootstrap was already applied before the Elastic IP was added, run the same `tofu apply` again from this directory. It adds the address and lets the deploy role associate it. It does not replace the VPN instance. Infra up is what attaches the address, and it fails with a clear message until this parameter exists.
+
+```bash
+tofu output -raw eip_public_ip
+tofu output -raw eip_allocation_id
+```
 
 ```bash
 tofu output -raw deploy_role_arn
@@ -164,9 +171,9 @@ tofu init
 tofu apply
 ```
 
-That creates the security group, a `t4g.nano` Amazon Linux 2023 instance in the default VPC's `us-west-2a` subnet, the A record `vpn.app.sapienexmachina.si`, and the log group `/openvpn/server`. User-data installs OpenVPN, pulls the PKI from SSM, and starts it. UDP 1194 is open to `allowed_cidrs`. Port 22 is not open. The instance's public address is the one the subnet assigns. The A record points the name at it. Destroy deletes the record and releases the address.
+That creates the security group, a `t4g.nano` Amazon Linux 2023 instance in the default VPC's `us-west-2a` subnet, attaches the Elastic IP from bootstrap, writes the A record `vpn.app.sapienexmachina.si` at that address, and creates the log group `/openvpn/server`. User-data installs OpenVPN, pulls the PKI from SSM, and starts it. UDP 1194 is open to `allowed_cidrs`. Port 22 is not open. OpenVPN listens on every address, so the association does not require a config change. Destroy deletes the record and detaches the Elastic IP. It does not release the address.
 
-While the server is up, a later apply does not replace it just because Amazon published a new AMI. Changing user-data does replace it, and the same apply updates the A record. Clients keep the same profile. Resolvers may keep the old address for up to 60 seconds. Adding a client does not replace the instance.
+The first apply after the Elastic IP exists changes the current instance's public address once, from the subnet-assigned address to the Elastic IP, and updates the A record in the same run. The instance is not replaced for that. Later applies keep the same address, including when user-data replaces the instance: the association moves to the new instance and the DNS name does not change. A later apply does not replace the instance just because Amazon published a new AMI. Changing user-data does replace it. Clients keep the same profile. Adding a client does not replace the instance. After that first address change, resolvers may keep the old address for up to the 60 second TTL.
 
 If `t4g.nano` runs out of memory during `dnf`, set `instance_type` to `t4g.micro` and apply again. User-data also creates a 1 GB swap file.
 
@@ -362,13 +369,13 @@ cd infra/vpn
 tofu destroy
 ```
 
-One destroy removes the security group, the instance, its public address, the root volume, the A record, the peering connection and the routes this stack added for it, and the log group. It does not delete the default VPC, any other route in that VPC, or the hosted zone. The instance has no deletion protection. The security group waits up to 20 minutes for the network interface to release.
+One destroy removes the security group, the instance, the root volume, the Elastic IP association, the A record, the peering connection and the routes this stack added for it, and the log group. It does not delete the default VPC, any other route in that VPC, the hosted zone, or the Elastic IP. The instance has no deletion protection. The security group waits up to 20 minutes for the network interface to release. The public IPv4 keeps billing at about $0.005 per hour until you release it.
 
-Left in place: the state bucket and the vpn state file, the deploy role, the budget, every SSM parameter under `/openvpn`, and GoNetLogo's zone. Client profiles do not change. The next Infra up builds a new instance, writes a new A record at the new address, and pulls the same PKI.
+Left in place: the state bucket and the vpn state file, the deploy role, the budget, the Elastic IP, every SSM parameter under `/openvpn`, and GoNetLogo's zone. Client profiles do not change. The next Infra up builds a new instance, attaches the same Elastic IP, writes the A record at that same address, and pulls the same PKI.
 
 ## Full teardown
 
-Destroy the vpn stack first so the A record is removed while the role can still change it. The vpn state lives in the bucket bootstrap owns. Bootstrap does not delete `app.sapienexmachina.si`.
+Destroy the vpn stack first so the A record is removed while the role can still change it, and so the Elastic IP is detached before bootstrap tries to release it. The vpn state lives in the bucket bootstrap owns. Bootstrap does not delete `app.sapienexmachina.si`. Destroying bootstrap releases the Elastic IP. That is the step that changes the public address. A later bootstrap apply allocates a new one.
 
 ```bash
 cd infra/vpn
@@ -395,17 +402,28 @@ tofu destroy
 
 The `get-parameters-by-path` query asks for names only. Delete the local `clients/*.ovpn` files as well. They will not work after the CA is gone, and they still contain private keys. This does not delete the GitHub OIDC provider. GoNetLogo still uses it.
 
+### Release the address only
+
+Infra down leaves the Elastic IP allocated, which is what keeps the address stable, and it keeps costing about $0.005 per hour. To release that address and keep the bucket, the role, and the budget, run Infra down first and then, from the administrator shell:
+
+```bash
+cd infra/bootstrap
+tofu destroy -target=aws_ssm_parameter.eip_allocation_id -target=aws_eip.vpn
+```
+
+The parameter has to go too. It holds the allocation id. The next `tofu apply` in `infra/bootstrap` allocates a different address, and the next Infra up attaches that new one. Do this only when the address should change. The deploy role cannot release the address.
+
 ## Pull requests
 
 A pull request that touches `infra/`, `scripts/`, or these workflows runs `tofu fmt -check` and `tofu validate` on both stacks. `tofu plan` for the vpn stack runs only when the pull request is from this repository and `AWS_DEPLOY_ROLE_ARN` is set. Forks, and this repository before the variable exists, skip the plan instead of failing. The plan job uses the production environment, so a required reviewer approves it before AWS is called. If you mark checks as required, require fmt and validate. The plan job is skipped until the variable exists, and a skipped required check can block a merge.
 
-Bootstrap is not planned in GitHub. An empty local state on the runner would ask to create the bucket again. The plan looks up the default VPC and the existing hosted zone, so both have to be there before a green plan. The GoNetLogo VPC does not. A missing `Name=gonetlogo` VPC skips peering instead of failing the plan.
+Bootstrap is not planned in GitHub. An empty local state on the runner would ask to create the bucket again. The plan looks up the default VPC, the existing hosted zone, and `/openvpn/network/eip-allocation-id`, so all three have to be there before a green plan. The GoNetLogo VPC does not. A missing `Name=gonetlogo` VPC skips peering instead of failing the plan. A missing Elastic IP parameter fails the plan until bootstrap has been applied.
 
 `scripts/test-pki.sh` runs the client script and the instance sync script against a fake AWS CLI. It checks that two clients get different keys, that the server config and the profile carry the TLS settings above, and that a revoke lands on the CRL.
 
 ## What the role can do
 
-The deploy role's trust policy is `sts:AssumeRoleWithWebIdentity` for the two subjects above and audience `sts.amazonaws.com`. Its policies cover the state bucket, the `openvpn-instance` role and instance profile (not its own trust policy), passing that role only to `ec2.amazonaws.com`, the security group and instance in us-west-2, creating and deleting the peering to a VPC tagged `Name=gonetlogo`, and adding or removing the routes for that peering. It cannot create or delete a VPC, a subnet, an internet gateway, a route table, or an Elastic IP. In Route 53 it can call `ChangeResourceRecordSets` only on the existing `app.sapienexmachina.si` zone, and only when every name in the change is `vpn.app.sapienexmachina.si` and every type is `A`. It can read that zone's records so OpenTofu can refresh the one record. It cannot delete the zone or change `gonetlogo.app.sapienexmachina.si`. It can also read the public Amazon Linux AMI parameter and read and write SSM parameters under `/openvpn` (including `/openvpn/secrets`, because the client workflow writes keys). KMS is limited to calls that SSM makes in this account, for the default SSM key. A deny blocks IAM, S3, SSM, ECR, ECS, and log resources whose names start with `gonetlogo` or `sapienexmachina`, and blocks security-group edits and instance termination against resources tagged with those projects.
+The deploy role's trust policy is `sts:AssumeRoleWithWebIdentity` for the two subjects above and audience `sts.amazonaws.com`. Its policies cover the state bucket, the `openvpn-instance` role and instance profile (not its own trust policy), passing that role only to `ec2.amazonaws.com`, the security group and instance in us-west-2, associating and disassociating the Elastic IP, creating and deleting the peering to a VPC tagged `Name=gonetlogo`, and adding or removing the routes for that peering. It cannot create or delete a VPC, a subnet, an internet gateway, or a route table. It cannot allocate or release an Elastic IP. That stays on the administrator who applies bootstrap. In Route 53 it can call `ChangeResourceRecordSets` only on the existing `app.sapienexmachina.si` zone, and only when every name in the change is `vpn.app.sapienexmachina.si` and every type is `A`. It can read that zone's records so OpenTofu can refresh the one record. It cannot delete the zone or change `gonetlogo.app.sapienexmachina.si`. It can also read the public Amazon Linux AMI parameter and read and write SSM parameters under `/openvpn` (including `/openvpn/secrets`, because the client workflow writes keys, and `/openvpn/network/eip-allocation-id`, which bootstrap writes). KMS is limited to calls that SSM makes in this account, for the default SSM key. A deny blocks IAM, S3, SSM, ECR, ECS, and log resources whose names start with `gonetlogo` or `sapienexmachina`, and blocks security-group edits and instance termination against resources tagged with those projects.
 
 The instance role is `AmazonSSMManagedInstanceCore` plus read of `/openvpn/pki/*` and `/openvpn/clients/*`, decrypt via SSM, and write to the one log group. It cannot read `/openvpn/secrets`.
 
@@ -415,7 +433,8 @@ The instance role is `AmazonSSMManagedInstanceCore` plus read of `/openvpn/pki/*
 - **Plan failed on the hosted zone.** GoNetLogo's bootstrap has not created `app.sapienexmachina.si`, or this bootstrap has not been applied so the role can read it.
 - **Plan failed on the default VPC.** `vpc-02297ce9cfb0e105d` is missing, or its CIDR is not `172.31.0.0/16`, or `us-west-2a` has no subnet.
 - **Infra up user-data failed.** Session Manager, then `/var/log/cloud-init-output.log`. The usual cause is `init` not run yet, so `/openvpn/pki/ca.crt` is missing. `dnf` dying on `t4g.nano` is the other one. Use `t4g.micro`.
-- **Client cannot connect.** The server must be up, and the resolver must have the current A record. After a rebuild that can take the 60 second TTL. A revoked certificate stays revoked.
+- **Plan or Infra up failed on the Elastic IP.** `/openvpn/network/eip-allocation-id` is missing. From the administrator shell, `cd infra/bootstrap` and `tofu apply`. Then run Infra up. The plan cannot succeed before that apply.
+- **Client cannot connect.** The server must be up, and the resolver must have the A record for the Elastic IP. The first attach changes the address once. After that, a rebuild keeps the same address. A resolver can keep the previous address for up to the 60 second TTL. A revoked certificate stays revoked.
 - **Client got 10.8.0.200 or higher instead of its static address.** OpenVPN dropped privileges and then could not enter `/etc/openvpn/server` (`0750 root:openvpn`), so it never read `ccd/`. The server runs as group `openvpn`, and as user `openvpn` when that account exists. Sync puts the directory and the CCD files back to `0750`/`0640 root:openvpn` on every run, and leaves `server.key` and the tls-crypt key at `0600 root`. The CRL is `0640 root:openvpn` because it is read again on each connection. A running instance still has the old `user`/`group` lines until the next Infra up, which replaces it because user-data changed. Reconnect after that. The `chmod o+x /etc/openvpn/server` hotfix is not needed on the new instance.
 - **Tunnel works, `10.20.0.0/16` does not.** Run Infra up again after the GoNetLogo VPC exists. `tofu output gonetlogo_vpc_id` is null when peering was skipped. If the route is there and curl still times out, the task security group does not allow this VPC yet. That follow-up is below.
 - **Connected, but curl times out.** Windows firewall, or the PC's tunnel is down. `Connection refused` means the packet arrived and Jan is not listening on `0.0.0.0` or the VPN address.

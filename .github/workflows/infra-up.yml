@@ -1,7 +1,8 @@
-# Create or update the destroyable VPN stack (VPC, instance, Elastic IP
-# association, logs). The state bucket, deploy role, Elastic IP, budget,
-# and the PKI in SSM are not in this state. The production environment
-# is the approval gate.
+# Create or update the destroyable VPN stack (security group, instance,
+# Elastic IP association, A record, logs). The state bucket, deploy role,
+# Elastic IP allocation, budget, and the PKI in SSM are not in this
+# state. The address must already exist from infra/bootstrap. The
+# production environment is the approval gate.
 
 name: Infra up
 
@@ -82,6 +83,15 @@ jobs:
             printf '%s\n' "$keys"
             echo "SSHKEYS_EOF"
           } >>"$GITHUB_ENV"
+
+      - name: Check Elastic IP
+        run: |
+          set -euo pipefail
+          if ! aws ssm get-parameter --region us-west-2 --name /openvpn/network/eip-allocation-id --query Parameter.Value --output text >/dev/null; then
+            echo "Apply infra/bootstrap from an administrator shell first. It allocates the Elastic IP. Infra up only attaches it." >&2
+            exit 1
+          fi
+          echo "Elastic IP allocation parameter is present."
 
       - name: Apply
         working-directory: infra/vpn

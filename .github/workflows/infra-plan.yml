@@ -136,6 +136,15 @@ jobs:
             echo "SSHKEYS_EOF"
           } >>"$GITHUB_ENV"
 
+      - name: Check Elastic IP
+        run: |
+          set -euo pipefail
+          if ! aws ssm get-parameter --region us-west-2 --name /openvpn/network/eip-allocation-id --query Parameter.Value --output text >/dev/null; then
+            echo "Apply infra/bootstrap from an administrator shell first. It allocates the Elastic IP. This plan only attaches it." >&2
+            exit 1
+          fi
+          echo "Elastic IP allocation parameter is present."
+
       - name: Plan
         working-directory: infra/vpn
         run: |

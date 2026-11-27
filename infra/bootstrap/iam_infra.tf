@@ -74,15 +74,17 @@ data "aws_iam_policy_document" "infra" {
     }
   }
 
-  # The instance uses the default VPC and an auto-assigned public
-  # address. This role cannot create a VPC, a subnet, an internet
-  # gateway, a route table, or an Elastic IP. It can peer to the
-  # GoNetLogo VPC and add or remove the two CIDR routes for that peering.
+  # The instance uses the default VPC. This role cannot create a VPC, a
+  # subnet, an internet gateway, a route table, or an Elastic IP, and it
+  # cannot release one. It can associate and disassociate the address
+  # bootstrap allocated. It can peer to the GoNetLogo VPC and add or
+  # remove the two CIDR routes for that peering.
   statement {
     sid    = "NetworkAndInstance"
     effect = "Allow"
     actions = [
       "ec2:AcceptVpcPeeringConnection",
+      "ec2:AssociateAddress",
       "ec2:AuthorizeSecurityGroupEgress",
       "ec2:AuthorizeSecurityGroupIngress",
       "ec2:CreateNetworkInterface",
@@ -99,6 +101,7 @@ data "aws_iam_policy_document" "infra" {
       "ec2:DeleteVpcPeeringConnection",
       "ec2:Describe*",
       "ec2:DetachNetworkInterface",
+      "ec2:DisassociateAddress",
       "ec2:Get*",
       "ec2:ModifyInstanceAttribute",
       "ec2:ModifyNetworkInterfaceAttribute",

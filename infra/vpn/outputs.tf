@@ -1,10 +1,15 @@
 output "public_ip" {
-  description = "Auto-assigned public address of the instance. Released on destroy. Clients use vpn_hostname, not this value."
-  value       = aws_instance.vpn.public_ip
+  description = "Elastic IP from bootstrap. Infra down disassociates it and does not release it. Clients use vpn_hostname, not this value."
+  value       = data.aws_eip.vpn.public_ip
+}
+
+output "eip_allocation_id" {
+  description = "Allocation id of public_ip. Owned by infra/bootstrap."
+  value       = data.aws_eip.vpn.id
 }
 
 output "vpn_hostname" {
-  description = "Name in client profiles. The A record points it at public_ip."
+  description = "Name in client profiles. The A record points it at the Elastic IP."
   value       = aws_route53_record.vpn.fqdn
 }
 
