@@ -6,7 +6,7 @@ data "aws_ssm_parameter" "eip_allocation_id" {
 }
 
 data "aws_eip" "vpn" {
-  id = data.aws_ssm_parameter.eip_allocation_id.value
+  id = nonsensitive(data.aws_ssm_parameter.eip_allocation_id.value)
 }
 
 resource "aws_eip_association" "vpn" {
