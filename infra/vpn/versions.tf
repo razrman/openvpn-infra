@@ -1,9 +1,9 @@
 # Destroyable VPN stack: security group, EC2 instance in the default VPC,
-# the association to the Elastic IP, the A record, optional peering, and
-# the log group. State is in the bucket from
-# infra/bootstrap, locked with OpenTofu's S3 lockfile (use_lockfile).
-# There is no DynamoDB table. The bucket name is a literal because a
-# backend block cannot interpolate.
+# the association to the Elastic IP, the A record, and the log group.
+# The GoNetLogo app stack owns the peering and its routes. State is in
+# the bucket from infra/bootstrap, locked with OpenTofu's S3 lockfile
+# (use_lockfile). There is no DynamoDB table. The bucket name is a
+# literal because a backend block cannot interpolate.
 #
 # The state bucket, deploy role, Elastic IP allocation, budget, and the
 # OpenVPN PKI in SSM are not in this state. Destroying this stack

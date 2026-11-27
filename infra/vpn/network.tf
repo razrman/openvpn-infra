@@ -1,7 +1,9 @@
 # The account default VPC. This stack does not create a VPC, a subnet,
-# an internet gateway, or a route table. It adds one route to the main
-# route table when the GoNetLogo VPC is up, and removes that route on
-# destroy. See peering.tf.
+# an internet gateway, or a route table, and it does not add routes.
+# The GoNetLogo app stack owns the peering. It puts gonetlogo_cidr on
+# this VPC's main route table, which the instance subnet uses, and
+# 172.31.0.0/16 on its own tables. Egress to those private addresses
+# stays open on the security group below.
 data "aws_vpc" "default" {
   id = var.default_vpc_id
 }
@@ -15,15 +17,6 @@ data "aws_subnets" "default_public" {
   filter {
     name   = "availability-zone"
     values = [var.instance_az]
-  }
-}
-
-data "aws_route_table" "default_main" {
-  vpc_id = data.aws_vpc.default.id
-
-  filter {
-    name   = "association.main"
-    values = ["true"]
   }
 }
 
@@ -69,11 +62,6 @@ resource "aws_security_group" "vpn" {
     precondition {
       condition     = length(data.aws_subnets.default_public.ids) > 0
       error_message = "The default VPC has no subnet in ${var.instance_az}."
-    }
-
-    precondition {
-      condition     = !var.peer_gonetlogo || length(data.aws_vpcs.gonetlogo.ids) <= 1
-      error_message = "More than one VPC is tagged Name=${var.gonetlogo_vpc_name}. Refusing to guess which one to peer."
     }
   }
 }

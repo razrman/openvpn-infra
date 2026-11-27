@@ -82,19 +82,13 @@ variable "dns_ttl" {
 
 variable "peer_gonetlogo" {
   type        = bool
-  description = "Peer to the VPC tagged Name=gonetlogo and push 10.20.0.0/16 to clients. When that VPC does not exist, apply skips the peering instead of failing. Set false to never peer."
+  description = "Push the GoNetLogo CIDR route to clients; the peering itself is created by the GoNetLogo stack. Set false to stop pushing that route and to skip masquerade of that CIDR. This does not look up the GoNetLogo VPC, so the push stays on while that stack is down."
   default     = true
-}
-
-variable "gonetlogo_vpc_name" {
-  type        = string
-  description = "Name tag on the GoNetLogo VPC, from that repo's infra/app/network.tf. The VPC id changes every time that stack is recreated."
-  default     = "gonetlogo"
 }
 
 variable "gonetlogo_cidr" {
   type        = string
-  description = "GoNetLogo VPC CIDR from that repo's infra/app/locals.tf. Pushed to clients and routed across the peering. It must not overlap the default VPC or the tunnel."
+  description = "GoNetLogo VPC CIDR from that repo's infra/app/locals.tf. Pushed to clients when peer_gonetlogo is true, whether or not that VPC exists. The GoNetLogo stack routes it across the peering it owns. It must not overlap the default VPC or the tunnel."
   default     = "10.20.0.0/16"
 
   validation {

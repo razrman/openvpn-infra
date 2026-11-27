@@ -28,7 +28,7 @@ The CA lasts 10 years. Server and client certificates last 5 years. There is no 
 | Stack | State | Survives teardown |
 | --- | --- | --- |
 | `infra/bootstrap` | Local file on the machine that applied it | Yes. State bucket, deploy role, monthly budget, Elastic IP. It looks up GoNetLogo's existing DNS zone and does not create one |
-| `infra/vpn` | S3 bucket from bootstrap, locked with an S3 lockfile (`use_lockfile`, no DynamoDB) | No. Security group, instance in the default VPC, the Elastic IP association, A record, optional peering and its routes, log group |
+| `infra/vpn` | S3 bucket from bootstrap, locked with an S3 lockfile (`use_lockfile`, no DynamoDB) | No. Security group, instance in the default VPC, the Elastic IP association, A record, log group. The GoNetLogo app stack owns the peering and its routes |
 
 The PKI is not in either state. `scripts/openvpn-client.sh` stores it in SSM Parameter Store as Standard SecureString parameters (the free tier). Secrets Manager would be about $0.40 per secret per month, and a client needs several secrets. Standard parameters are limited to 4096 bytes, which covers these EC certificates, the tls-crypt key, and a CRL for a small number of clients.
 
@@ -51,7 +51,7 @@ Traffic between VPN clients, and from clients into the peered VPC, is forwarded 
 | `10.8.0.10`–`10.8.0.199` | Static clients (`ifconfig-push`). Suggested: `windows-pc` = `.10`, `linux-box` = `.11` |
 | `10.8.0.200`–`10.8.0.249` | Dynamic fallback only, if a certificate connects before its CCD file exists |
 | `172.31.0.0/16` | Account default VPC `vpc-02297ce9cfb0e105d`. The instance lives in the `us-west-2a` subnet. This stack does not create the VPC. Clients are not given a route to it |
-| `10.20.0.0/16` | GoNetLogo VPC, when that stack is up. Pushed to clients. Does not overlap the default VPC or the tunnel |
+| `10.20.0.0/16` | GoNetLogo VPC CIDR. Pushed to clients when `peer_gonetlogo` is true, whether or not that VPC is up. The GoNetLogo stack owns the peering. Does not overlap the default VPC or the tunnel |
 | `vpn.app.sapienexmachina.si` | Server name in the existing zone `app.sapienexmachina.si`. The A record's TTL is 60 seconds and it points at the Elastic IP |
 
 The home LAN must not be `10.8.0.0/24`. If it is, change `vpn_cidr` in `infra/vpn/variables.tf` and `VPN_PREFIX` in `scripts/openvpn-client.sh` together, and do that before you add a client. The script is the piece that picks static addresses.
@@ -79,7 +79,7 @@ The Elastic IP is the charge. A public IPv4 is about $0.005 per hour, about $3.6
 
 While the server is running, the Elastic IP replaces the address the subnet would have assigned. It is one public IPv4, not a second one. The same $0.005 per hour continues after Infra down until you release the allocation. Clients keep using the DNS name. A rebuild does not change that address.
 
-The instance uses the existing default VPC, so there is no second VPC and no NAT gateway. Peering has no hourly charge. Traffic that stays in one availability zone is free. Traffic that crosses availability zones over the peering connection is about $0.01 per GB each way.
+The instance uses the existing default VPC, so there is no second VPC and no NAT gateway. The GoNetLogo app stack owns the peering. Peering has no hourly charge. Traffic that stays in one availability zone is free. Traffic that crosses availability zones over the peering connection is about $0.01 per GB each way.
 
 `t4g.micro` adds about $3 and can cross the $10 budget while the server is up. Data transfer out to the internet is extra if the API responses are large. The free-tier allowance, if the account still has it, covers the small calls. Split tunnel keeps ordinary browsing off this path.
 
@@ -171,7 +171,7 @@ tofu init
 tofu apply
 ```
 
-That creates the security group, a `t4g.nano` Amazon Linux 2023 instance in the default VPC's `us-west-2a` subnet, attaches the Elastic IP from bootstrap, writes the A record `vpn.app.sapienexmachina.si` at that address, and creates the log group `/openvpn/server`. User-data installs OpenVPN, pulls the PKI from SSM, and starts it. UDP 1194 is open to `allowed_cidrs`. Port 22 is not open. OpenVPN listens on every address, so the association does not require a config change. Destroy deletes the record and detaches the Elastic IP. It does not release the address.
+That creates the security group, a `t4g.nano` Amazon Linux 2023 instance in the default VPC's `us-west-2a` subnet, attaches the Elastic IP from bootstrap, writes the A record `vpn.app.sapienexmachina.si` at that address, and creates the log group `/openvpn/server`. It does not create the peering or its routes. User-data installs OpenVPN, pulls the PKI from SSM, and starts it. UDP 1194 is open to `allowed_cidrs`. Port 22 is not open. OpenVPN listens on every address, so the association does not require a config change. Destroy deletes the record and detaches the Elastic IP. It does not release the address, and it does not delete the peering.
 
 The first apply after the Elastic IP exists changes the current instance's public address once, from the subnet-assigned address to the Elastic IP, and updates the A record in the same run. The instance is not replaced for that. Later applies keep the same address, including when user-data replaces the instance: the association moves to the new instance and the DNS name does not change. A later apply does not replace the instance just because Amazon published a new AMI. Changing user-data does replace it. Clients keep the same profile. Adding a client does not replace the instance. After that first address change, resolvers may keep the old address for up to the 60 second TTL.
 
@@ -262,22 +262,17 @@ Import that profile on the Windows PC. `linux-box` is already `10.8.0.11` if you
 
 ## Reaching GoNetLogo
 
-`peer_gonetlogo` defaults to true. Infra up looks for a VPC tagged `Name=gonetlogo`. That tag is set in GoNetLogo's `infra/app/network.tf`. The VPC id changes every time that stack is created.
+The GoNetLogo app stack (`razrman/GoNetLogo`, `infra/app`) owns the VPC peering and the routes on both sides. This stack does not create or destroy that peering. GoNetLogo's Infra down deletes the peering before it deletes its VPC. This stack's Infra down leaves the peering and those routes alone.
 
-- If the VPC is up, this stack creates the peering, adds `10.20.0.0/16` to the default VPC's main route table, and adds `172.31.0.0/16` to every route table in the GoNetLogo VPC. Destroy removes those routes and nothing else in either table.
-- If the VPC is not up, apply still succeeds and creates no peering. `tofu output gonetlogo_vpc_id` is null. Clients are still pushed `10.20.0.0/16` (the server config does not change when the VPC appears), and that traffic is dropped until the peering exists. It is not a default route, so home internet is unaffected.
-- Bring GoNetLogo up later, then run Infra up again. The plan adds the peering and the routes. The instance is not replaced, because user-data did not change. Reconnect the clients if they connected before the route was pushed.
-- Tear GoNetLogo down after this stack has deleted its return routes, or run Infra up here first with the GoNetLogo VPC still present. If that VPC is already gone, deleting a return route can fail with `InvalidRouteTableID.NotFound`. Remove the stale routes from state and apply again:
+`peer_gonetlogo` defaults to true. It pushes `gonetlogo_cidr` (`10.20.0.0/16`) to VPN clients and masquerades that CIDR to the instance address in the default VPC. The push does not depend on the GoNetLogo VPC existing right now. The peering comes and goes with the GoNetLogo stack. Set `peer_gonetlogo` to false to stop the push and the masquerade. The pushed route is not a default route, so home internet is unaffected.
 
-```bash
-cd infra/vpn
-tofu state rm 'aws_route.gonetlogo_return'
-tofu apply
-```
+GoNetLogo adds `10.20.0.0/16` on the default VPC main route table, which the instance subnet uses, and adds `172.31.0.0/16` on its own route tables. This stack's security group still allows egress to those private addresses. While the peering is down, clients still have the `10.20.0.0/16` route and that traffic is dropped. Bringing GoNetLogo up does not change this server's user-data, so the instance is not replaced. Reconnect a client that connected before the route was pushed.
+
+The first apply after this change forgets `aws_vpc_peering_connection.gonetlogo`, `aws_route.to_gonetlogo`, and `aws_route.gonetlogo_return`. Those `removed` blocks set `destroy = false`. The peering was already deleted by hand. The apply drops the addresses from state and does not call the EC2 delete APIs, so it will not remove a route GoNetLogo created for the same destination.
 
 The instance masquerades client traffic into the peered VPC, so GoNetLogo sees the default VPC CIDR `172.31.0.0/16`, not `10.8.0.0/24`. GoNetLogo cannot open a connection to a VPN client address. Source/destination check on the instance stays enabled.
 
-GoNetLogo's task security group `gonetlogo-task` allows TCP 8080 only from `gonetlogo-alb`. This repo does not change that group. Until GoNetLogo allows TCP 8080 from `172.31.0.0/16`, a client can route to a task and still get no answer. Do not open 8080 to `0.0.0.0/0`, and do not use `10.8.0.0/24` as the source, because the packets are masqueraded. Any other private service in that VPC needs the same kind of rule for the port you want. The public load balancer is a separate path and does not need the peering.
+GoNetLogo's task security group `gonetlogo-task` allows TCP 8080 only from `gonetlogo-alb`. This repo does not change that group. Until GoNetLogo allows TCP 8080 from `172.31.0.0/16`, a client can route to a task and still get no answer. Do not open 8080 to `0.0.0.0/0`, and do not use `10.8.0.0/24` as the source, because the packets are masqueraded. Any other private service in that VPC needs the same kind of rule for the port you want. The public load balancer is a separate path and does not use the peering.
 
 After that rule exists, from the Linux client, with both tunnels up and a task running:
 
@@ -293,7 +288,7 @@ The PC is native Windows 11. Copy `windows-pc.ovpn` onto it and import that file
 
 **OpenVPN Connect:** Import Profile → File, then connect. The profile asks Connect to check the server name and to route only what the server pushes.
 
-**OpenVPN GUI** (community edition, from openvpn.net): put the file in `C:\Users\<you>\OpenVPN\config\` or `C:\Program Files\OpenVPN\config\`. The GUI may need to be run as administrator the first time so it can install the pushed routes (`10.8.0.0/24` and, when peering is on, `10.20.0.0/16`).
+**OpenVPN GUI** (community edition, from openvpn.net): put the file in `C:\Users\<you>\OpenVPN\config\` or `C:\Program Files\OpenVPN\config\`. The GUI may need to be run as administrator the first time so it can install the pushed routes (`10.8.0.0/24` and, when `peer_gonetlogo` is true, `10.20.0.0/16`).
 
 The VPN address is the static one from `add` (`10.8.0.10` if you followed the example). Confirm in PowerShell:
 
@@ -369,7 +364,7 @@ cd infra/vpn
 tofu destroy
 ```
 
-One destroy removes the security group, the instance, the root volume, the Elastic IP association, the A record, the peering connection and the routes this stack added for it, and the log group. It does not delete the default VPC, any other route in that VPC, the hosted zone, or the Elastic IP. The instance has no deletion protection. The security group waits up to 20 minutes for the network interface to release. The public IPv4 keeps billing at about $0.005 per hour until you release it.
+One destroy removes the security group, the instance, the root volume, the Elastic IP association, the A record, and the log group. It does not delete the peering or the routes the GoNetLogo stack added, the default VPC, any other route in that VPC, the hosted zone, or the Elastic IP. The instance has no deletion protection. The security group waits up to 20 minutes for the network interface to release. The public IPv4 keeps billing at about $0.005 per hour until you release it.
 
 Left in place: the state bucket and the vpn state file, the deploy role, the budget, the Elastic IP, every SSM parameter under `/openvpn`, and GoNetLogo's zone. Client profiles do not change. The next Infra up builds a new instance, attaches the same Elastic IP, writes the A record at that same address, and pulls the same PKI.
 
@@ -417,13 +412,13 @@ The parameter has to go too. It holds the allocation id. The next `tofu apply` i
 
 A pull request that touches `infra/`, `scripts/`, or these workflows runs `tofu fmt -check` and `tofu validate` on both stacks. `tofu plan` for the vpn stack runs only when the pull request is from this repository and `AWS_DEPLOY_ROLE_ARN` is set. Forks, and this repository before the variable exists, skip the plan instead of failing. The plan job uses the production environment, so a required reviewer approves it before AWS is called. If you mark checks as required, require fmt and validate. The plan job is skipped until the variable exists, and a skipped required check can block a merge.
 
-Bootstrap is not planned in GitHub. An empty local state on the runner would ask to create the bucket again. The plan looks up the default VPC, the existing hosted zone, and `/openvpn/network/eip-allocation-id`, so all three have to be there before a green plan. The GoNetLogo VPC does not. A missing `Name=gonetlogo` VPC skips peering instead of failing the plan. A missing Elastic IP parameter fails the plan until bootstrap has been applied.
+Bootstrap is not planned in GitHub. An empty local state on the runner would ask to create the bucket again. The plan looks up the default VPC, the existing hosted zone, and `/openvpn/network/eip-allocation-id`, so all three have to be there before a green plan. It does not look up the GoNetLogo VPC. A missing Elastic IP parameter fails the plan until bootstrap has been applied.
 
 `scripts/test-pki.sh` runs the client script and the instance sync script against a fake AWS CLI. It checks that two clients get different keys, that the server config and the profile carry the TLS settings above, and that a revoke lands on the CRL.
 
 ## What the role can do
 
-The deploy role's trust policy is `sts:AssumeRoleWithWebIdentity` for the two subjects above and audience `sts.amazonaws.com`. Its policies cover the state bucket, the `openvpn-instance` role and instance profile (not its own trust policy), passing that role only to `ec2.amazonaws.com`, the security group and instance in us-west-2, associating and disassociating the Elastic IP, creating and deleting the peering to a VPC tagged `Name=gonetlogo`, and adding or removing the routes for that peering. It cannot create or delete a VPC, a subnet, an internet gateway, or a route table. It cannot allocate or release an Elastic IP. That stays on the administrator who applies bootstrap. In Route 53 it can call `ChangeResourceRecordSets` only on the existing `app.sapienexmachina.si` zone, and only when every name in the change is `vpn.app.sapienexmachina.si` and every type is `A`. It can read that zone's records so OpenTofu can refresh the one record. It cannot delete the zone or change `gonetlogo.app.sapienexmachina.si`. It can also read the public Amazon Linux AMI parameter and read and write SSM parameters under `/openvpn` (including `/openvpn/secrets`, because the client workflow writes keys, and `/openvpn/network/eip-allocation-id`, which bootstrap writes). KMS is limited to calls that SSM makes in this account, for the default SSM key. A deny blocks IAM, S3, SSM, ECR, ECS, and log resources whose names start with `gonetlogo` or `sapienexmachina`, and blocks security-group edits and instance termination against resources tagged with those projects.
+The deploy role's trust policy is `sts:AssumeRoleWithWebIdentity` for the two subjects above and audience `sts.amazonaws.com`. Its policies cover the state bucket, the `openvpn-instance` role and instance profile (not its own trust policy), passing that role only to `ec2.amazonaws.com`, the security group and instance in us-west-2, and associating and disassociating the Elastic IP. The policy still lists creating and deleting a VPC peering connection and creating and deleting routes. The vpn stack no longer calls those actions. The GoNetLogo app stack owns the peering and its routes. It cannot create or delete a VPC, a subnet, an internet gateway, or a route table. It cannot allocate or release an Elastic IP. That stays on the administrator who applies bootstrap. In Route 53 it can call `ChangeResourceRecordSets` only on the existing `app.sapienexmachina.si` zone, and only when every name in the change is `vpn.app.sapienexmachina.si` and every type is `A`. It can read that zone's records so OpenTofu can refresh the one record. It cannot delete the zone or change `gonetlogo.app.sapienexmachina.si`. It can also read the public Amazon Linux AMI parameter and read and write SSM parameters under `/openvpn` (including `/openvpn/secrets`, because the client workflow writes keys, and `/openvpn/network/eip-allocation-id`, which bootstrap writes). KMS is limited to calls that SSM makes in this account, for the default SSM key. A deny blocks IAM, S3, SSM, ECR, ECS, and log resources whose names start with `gonetlogo` or `sapienexmachina`, and blocks security-group edits and instance termination against resources tagged with those projects.
 
 The instance role is `AmazonSSMManagedInstanceCore` plus read of `/openvpn/pki/*` and `/openvpn/clients/*`, decrypt via SSM, and write to the one log group. It cannot read `/openvpn/secrets`.
 
@@ -436,7 +431,7 @@ The instance role is `AmazonSSMManagedInstanceCore` plus read of `/openvpn/pki/*
 - **Plan or Infra up failed on the Elastic IP.** `/openvpn/network/eip-allocation-id` is missing. From the administrator shell, `cd infra/bootstrap` and `tofu apply`. Then run Infra up. The plan cannot succeed before that apply.
 - **Client cannot connect.** The server must be up, and the resolver must have the A record for the Elastic IP. The first attach changes the address once. After that, a rebuild keeps the same address. A resolver can keep the previous address for up to the 60 second TTL. A revoked certificate stays revoked.
 - **Client got 10.8.0.200 or higher instead of its static address.** OpenVPN dropped privileges and then could not enter `/etc/openvpn/server` (`0750 root:openvpn`), so it never read `ccd/`. The server runs as group `openvpn`, and as user `openvpn` when that account exists. Sync puts the directory and the CCD files back to `0750`/`0640 root:openvpn` on every run, and leaves `server.key` and the tls-crypt key at `0600 root`. The CRL is `0640 root:openvpn` because it is read again on each connection. A running instance still has the old `user`/`group` lines until the next Infra up, which replaces it because user-data changed. Reconnect after that. The `chmod o+x /etc/openvpn/server` hotfix is not needed on the new instance.
-- **Tunnel works, `10.20.0.0/16` does not.** Run Infra up again after the GoNetLogo VPC exists. `tofu output gonetlogo_vpc_id` is null when peering was skipped. If the route is there and curl still times out, the task security group does not allow this VPC yet. That follow-up is below.
+- **Tunnel works, `10.20.0.0/16` does not.** The client needs the pushed route (`peer_gonetlogo` true; reconnect if it connected before that push). The GoNetLogo stack's peering has to be up, with `10.20.0.0/16` on the default VPC main route table and `172.31.0.0/16` on the GoNetLogo tables. If the route is there and curl still times out, the task security group does not allow this VPC yet. That follow-up is in Reaching GoNetLogo.
 - **Connected, but curl times out.** Windows firewall, or the PC's tunnel is down. `Connection refused` means the packet arrived and Jan is not listening on `0.0.0.0` or the VPN address.
 - **Home internet died after connecting.** The profile or the server is pushing `redirect-gateway`. Neither file in this repo does. Disconnect and check the imported profile.
 - **Revoke did not drop a live session.** The sync timer restarts OpenVPN within about a minute of the CRL change. `sudo systemctl restart openvpn-server@server` from Session Manager does it immediately.

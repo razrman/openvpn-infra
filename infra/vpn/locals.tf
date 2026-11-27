@@ -10,11 +10,6 @@ locals {
   gonetlogo_network = cidrhost(var.gonetlogo_cidr, 0)
   gonetlogo_netmask = cidrnetmask(var.gonetlogo_cidr)
 
-  # peer_gonetlogo is the switch. A missing VPC is the other off position.
-  # More than one match is rejected by the security group precondition
-  # rather than peering an arbitrary id.
-  peer_active = var.peer_gonetlogo && length(data.aws_vpcs.gonetlogo.ids) == 1
-
   # The cloud-init script is larger than EC2's 16KB user-data limit, so
   # the instance receives a gzip wrapper and unpacks it at boot.
   user_data_script = templatefile("${path.module}/templates/user-data.sh.tftpl", {

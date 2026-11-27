@@ -48,12 +48,6 @@ output "security_group_id" {
   value       = aws_security_group.vpn.id
 }
 
-output "gonetlogo_vpc_id" {
-  description = "Peered GoNetLogo VPC, or null when that VPC is not up."
-  value       = local.peer_active ? data.aws_vpcs.gonetlogo.ids[0] : null
-}
-
-output "peering_connection_id" {
-  description = "Peering connection to GoNetLogo, or null when that VPC is not up."
-  value       = local.peer_active ? aws_vpc_peering_connection.gonetlogo[0].id : null
-}
+# The GoNetLogo app stack owns the VPC peering and its routes. This
+# stack does not export a peering connection id or the GoNetLogo VPC id.
+# peer_gonetlogo only controls the route pushed to VPN clients.
