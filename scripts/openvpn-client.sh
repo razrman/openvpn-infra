@@ -421,7 +421,7 @@ parts = [
     "# Dedicated certificate for %s. Do not share this file.\n" % name,
     "# vpn-ip: %s\n" % vpn_ip,
     "# Split tunnel: no redirect-gateway. The server pushes the VPN subnet\n",
-    "# and, when peering is on, the GoNetLogo CIDR.\n",
+    "# and the GoNetLogo CIDR when the server is set to push it.\n",
     "# No username or password. Authentication is this certificate.\n",
     "client\n",
     "dev tun\n",

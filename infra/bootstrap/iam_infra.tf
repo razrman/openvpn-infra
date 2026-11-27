@@ -77,8 +77,9 @@ data "aws_iam_policy_document" "infra" {
   # The instance uses the default VPC. This role cannot create a VPC, a
   # subnet, an internet gateway, a route table, or an Elastic IP, and it
   # cannot release one. It can associate and disassociate the address
-  # bootstrap allocated. It can peer to the GoNetLogo VPC and add or
-  # remove the two CIDR routes for that peering.
+  # bootstrap allocated. The peering and route actions below stay on
+  # this policy. infra/vpn no longer calls them. The GoNetLogo app stack
+  # owns the peering and its routes.
   statement {
     sid    = "NetworkAndInstance"
     effect = "Allow"

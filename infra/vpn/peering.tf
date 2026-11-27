@@ -1,62 +1,37 @@
-# GoNetLogo's app stack is created and destroyed on its own. The VPC id
-# changes every time that stack is applied. Look it up by the Name tag
-# from that repo (infra/app/network.tf). Zero matches is a skip, not an
-# error: Infra up still builds the VPN server, and a later Infra up
-# adds the peering once the VPC exists.
-data "aws_vpcs" "gonetlogo" {
-  filter {
-    name   = "tag:Name"
-    values = [var.gonetlogo_vpc_name]
-  }
-}
+# The GoNetLogo app stack (razrman/GoNetLogo, infra/app) owns the VPC
+# peering and the routes on both sides. It adds 10.20.0.0/16 on the
+# default VPC main table, which this instance's subnet uses, and
+# 172.31.0.0/16 on its own tables. This stack only pushes that CIDR to
+# VPN clients when peer_gonetlogo is true.
+#
+# These addresses used to be resources in this state. The peering was
+# deleted in AWS by hand so GoNetLogo's Infra down can destroy its
+# connection before deleting its VPC. destroy is false so the next
+# apply forgets them and does not call the EC2 delete APIs. A route is
+# identified by table and destination, so a destroy from this state
+# could remove a route the GoNetLogo stack had just created. Delete
+# these blocks after one apply has dropped the addresses from state.
 
-data "aws_vpc" "gonetlogo" {
-  count = local.peer_active ? 1 : 0
-  id    = data.aws_vpcs.gonetlogo.ids[0]
-}
-
-data "aws_route_tables" "gonetlogo" {
-  count  = local.peer_active ? 1 : 0
-  vpc_id = data.aws_vpc.gonetlogo[0].id
-}
-
-resource "aws_vpc_peering_connection" "gonetlogo" {
-  count = local.peer_active ? 1 : 0
-
-  vpc_id      = data.aws_vpc.default.id
-  peer_vpc_id = data.aws_vpc.gonetlogo[0].id
-  auto_accept = true
-
-  tags = {
-    Name = "openvpn-gonetlogo"
-  }
+removed {
+  from = aws_vpc_peering_connection.gonetlogo
 
   lifecycle {
-    precondition {
-      condition     = data.aws_vpc.gonetlogo[0].cidr_block == var.gonetlogo_cidr
-      error_message = "VPC ${data.aws_vpc.gonetlogo[0].id} tagged Name=${var.gonetlogo_vpc_name} is ${data.aws_vpc.gonetlogo[0].cidr_block}, not ${var.gonetlogo_cidr}."
-    }
+    destroy = false
   }
 }
 
-# One route on the default VPC main table. The instance subnet uses that
-# table. Destroy deletes this route and leaves every other route alone.
-resource "aws_route" "to_gonetlogo" {
-  count = local.peer_active ? 1 : 0
+removed {
+  from = aws_route.to_gonetlogo
 
-  route_table_id            = data.aws_route_table.default_main.id
-  destination_cidr_block    = var.gonetlogo_cidr
-  vpc_peering_connection_id = aws_vpc_peering_connection.gonetlogo[0].id
+  lifecycle {
+    destroy = false
+  }
 }
 
-# Return path. Clients are masqueraded to the instance's address in the
-# default VPC, so GoNetLogo routes 172.31.0.0/16, not the tunnel
-# 10.8.0.0/24. Every route table in that VPC gets the route, which covers
-# the public table (gonetlogo-public) and the main table.
-resource "aws_route" "gonetlogo_return" {
-  for_each = local.peer_active ? toset(data.aws_route_tables.gonetlogo[0].ids) : toset([])
+removed {
+  from = aws_route.gonetlogo_return
 
-  route_table_id            = each.value
-  destination_cidr_block    = data.aws_vpc.default.cidr_block
-  vpc_peering_connection_id = aws_vpc_peering_connection.gonetlogo[0].id
+  lifecycle {
+    destroy = false
+  }
 }
