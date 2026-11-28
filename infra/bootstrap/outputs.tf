@@ -49,7 +49,7 @@ output "eip_allocation_id" {
 }
 
 output "ami_builder_instance_profile" {
-  description = "Instance profile Packer attaches to the temporary builder. Session Manager only. It cannot read /openvpn."
+  description = "Instance profile Packer attaches to the temporary builder. The role has no policies and cannot read /openvpn."
   value       = aws_iam_instance_profile.ami_builder.name
 }
 

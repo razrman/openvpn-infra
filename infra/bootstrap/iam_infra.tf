@@ -49,8 +49,18 @@ data "aws_iam_policy_document" "infra" {
     }
   }
 
-  # The Packer builder profile. Bootstrap creates the role. This
-  # statement only lets the workflow pass it to EC2.
+  # Packer amazon-ebs looks the builder profile up by name, then passes
+  # its role to EC2 on RunInstances. This does not let the workflow
+  # create, change, or delete that role. Bootstrap owns it.
+  statement {
+    sid     = "ReadAmiBuilderProfile"
+    effect  = "Allow"
+    actions = ["iam:GetInstanceProfile"]
+    resources = [
+      "arn:aws:iam::${var.account_id}:instance-profile/openvpn-ami-builder",
+    ]
+  }
+
   statement {
     sid       = "PassAmiBuilderRole"
     effect    = "Allow"
@@ -230,10 +240,17 @@ data "aws_iam_policy_document" "infra" {
     resources = ["arn:aws:route53:::change/*"]
   }
 
-  # Image build. Create and register are not tag-scoped: the image does
-  # not have its tag until Packer sets it. Deregister and snapshot delete
-  # require project=openvpn, which Packer sets on the image and the
-  # snapshot. The workflow also filters the name openvpn-base-*.
+  # Image build, matched to Packer amazon-ebs 1.8.4 for this template:
+  # key pair, temporary security group, RunInstances with the builder
+  # profile, stop, CreateImage, tags, and volume attach or detach.
+  # Describe* and Get* on the statement above cover the reads, including
+  # GetPasswordData. Create and register are not tag-scoped: the image
+  # does not have its tag until Packer sets it. Deregister and snapshot
+  # delete require project=openvpn. The workflow also filters the name
+  # openvpn-base-*. This template does not use spot fleets, launch
+  # templates, fast launch, image deprecation, region copy, or a
+  # Packer-created IAM role, so those actions are not granted. Session
+  # Manager and EC2 Instance Connect are not granted either.
   statement {
     sid    = "AmiBuild"
     effect = "Allow"
@@ -244,6 +261,7 @@ data "aws_iam_policy_document" "infra" {
       "ec2:CreateKeyPair",
       "ec2:CreateSnapshot",
       "ec2:DeleteKeyPair",
+      "ec2:DetachVolume",
       "ec2:GetPasswordData",
       "ec2:ModifyImageAttribute",
       "ec2:ModifySnapshotAttribute",
@@ -277,41 +295,6 @@ data "aws_iam_policy_document" "infra" {
       test     = "StringEquals"
       variable = "ec2:ResourceTag/project"
       values   = ["openvpn"]
-    }
-  }
-
-  # Packer reaches the builder through Session Manager. The document is
-  # AWS-owned, so its ARN has an empty account id.
-  statement {
-    sid    = "AmiSession"
-    effect = "Allow"
-    actions = [
-      "ssm:ResumeSession",
-      "ssm:StartSession",
-      "ssm:TerminateSession",
-    ]
-    resources = [
-      "arn:aws:ec2:${var.aws_region}:${var.account_id}:instance/*",
-      "arn:aws:ssm:${var.aws_region}:${var.account_id}:session/*",
-      "arn:aws:ssm:${var.aws_region}::document/AWS-StartSSHSession",
-      "arn:aws:ssm:*::document/AWS-StartSSHSession",
-    ]
-  }
-
-  statement {
-    sid    = "AmiSessionDescribe"
-    effect = "Allow"
-    actions = [
-      "ssm:DescribeInstanceInformation",
-      "ssm:DescribeSessions",
-      "ssm:GetConnectionStatus",
-    ]
-    resources = ["*"]
-
-    condition {
-      test     = "StringEquals"
-      variable = "aws:RequestedRegion"
-      values   = [var.aws_region]
     }
   }
 

@@ -183,9 +183,27 @@ grep -q 'packages already installed' "$root/infra/vpn/templates/user-data.sh.tft
 grep -q 'iptables-nft' "$root/infra/vpn/templates/user-data.sh.tftpl" || fail "user-data package list drifted"
 grep -q 'iptables-nft' "$root/packer/provision.sh" || fail "image must preinstall iptables-nft"
 grep -q 'amazon-cloudwatch-agent' "$root/packer/provision.sh" || fail "image must preinstall the cloudwatch agent"
-grep -E -q 'ssh_interface[[:space:]]*=[[:space:]]*"session_manager"' "$root/packer/openvpn-base.pkr.hcl" || fail "builder must use Session Manager"
+grep -E -q 'ssh_interface[[:space:]]*=[[:space:]]*"public_ip"' "$root/packer/openvpn-base.pkr.hcl" || fail "builder must SSH over its public address"
+grep -E -q 'temporary_security_group_source_public_ip[[:space:]]*=[[:space:]]*true' "$root/packer/openvpn-base.pkr.hcl" || fail "builder SSH must be limited to the host running Packer"
+if grep -E -q 'ssh_interface[[:space:]]*=[[:space:]]*"session_manager"' "$root/packer/openvpn-base.pkr.hcl"; then
+  fail "builder must not use Session Manager"
+fi
+if grep -E -q '^[[:space:]]*temporary_security_group_source_cidrs[[:space:]]*=' "$root/packer/openvpn-base.pkr.hcl"; then
+  fail "a CIDR list makes Packer ignore the runner public IP"
+fi
+if grep -q '0.0.0.0/0' "$root/packer/openvpn-base.pkr.hcl"; then
+  fail "the builder security group must not allow the internet"
+fi
 grep -E -q 'project[[:space:]]*=[[:space:]]*"openvpn"' "$root/packer/openvpn-base.pkr.hcl" || fail "AMI must be tagged project=openvpn"
 grep -q 'openvpn-ami-builder' "$root/infra/bootstrap/ami.tf" || fail "builder role must live in bootstrap"
+if grep -q 'AmazonSSMManagedInstanceCore' "$root/infra/bootstrap/ami.tf"; then
+  fail "the builder role must not have Session Manager permissions"
+fi
+grep -q 'instance-profile/openvpn-ami-builder' "$root/infra/bootstrap/iam_infra.tf" || fail "deploy role cannot read the builder instance profile"
+grep -q 'sid       = "PassAmiBuilderRole"' "$root/infra/bootstrap/iam_infra.tf" || grep -q 'sid *= "PassAmiBuilderRole"' "$root/infra/bootstrap/iam_infra.tf" || fail "deploy role cannot pass the builder role"
+if grep -q 'ssm:StartSession' "$root/infra/bootstrap/iam_infra.tf"; then
+  fail "the deploy role must not start SSM sessions"
+fi
 grep -q 'ec2:DeregisterImage' "$root/infra/bootstrap/iam_infra.tf" || fail "deploy role cannot deregister images"
 grep -q 'ec2:ResourceTag/project' "$root/infra/bootstrap/iam_infra.tf" || fail "image delete must require the project tag"
 if grep -R --exclude-dir=.git -E 'BEGIN (OPENSSH |RSA )?PRIVATE KEY' "$root/packer"; then
