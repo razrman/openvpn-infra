@@ -8,7 +8,7 @@ Account `457504029722`, region `us-west-2`. OpenTofu `1.13.9` (the pin is `infra
 
 This repository is public. Client profiles and `infra/bootstrap/terraform.tfstate` are secret. Both are gitignored. Do not paste a profile into an Actions log, a pull request, or a chat.
 
-**What changed.** The public address is an Elastic IP from `infra/bootstrap`. It stays the same across Infra up, instance replacement, and Infra down. Re-apply bootstrap from an administrator shell before the next Infra up. That first Infra up attaches the address, so the current instance's public IP changes once, and `vpn.app.sapienexmachina.si` follows it. Existing profiles use that hostname and do not change. SSH to the server is still `ssh ec2-user@10.8.0.1` from a tunnel client named in `access.yaml`.
+**What changed.** The server is a `t4g.micro`. A Packer image named `openvpn-base-<date>` can preinstall `openvpn`, `iptables-nft`, and the CloudWatch agent so cloud-init does not spend several minutes in `dnf`. The image has no certificates and no SSH keys. Apply bootstrap, run **Build AMI**, then Infra up. Before that image exists, Infra up still boots stock Amazon Linux 2023 and installs the packages. A newer image does not replace a server that is already up. SSH to the server is still `ssh ec2-user@10.8.0.1` from a tunnel client named in `access.yaml`.
 
 ## Certificates and trust
 
@@ -68,22 +68,23 @@ List-price sketch for `us-west-2`, 730 hours in a month. Not a bill.
 
 The Elastic IP is the charge. A public IPv4 is about $0.005 per hour, about $3.60 a month, whether or not an instance is attached. Infra down leaves the allocation in place so the address does not change. Releasing it, which is a separate bootstrap destroy described under Full teardown, drops that charge to zero. There is no hosted zone in this repo. The name `vpn.app.sapienexmachina.si` is one A record in the zone GoNetLogo already pays for (`app.sapienexmachina.si`, about $0.50 a month on that other stack). S3 state and SSM standard parameters are cents or free. The budget, if it is one of the account's first two, is free.
 
-**Running** (`t4g.nano`, the default): about **$8 a month**.
+**Running** (`t4g.micro`, the default): about **$11 a month**.
 
 | Piece | About |
 | --- | --- |
-| `t4g.nano` | $3.07 |
+| `t4g.micro`, $0.0084 per hour | $6.13 |
 | Public IPv4, the Elastic IP, $0.005 per hour, about $3.60 a month | $3.60 |
 | 8 GB gp3 root volume | $0.64 |
+| Up to three base-image snapshots | under $1 |
 | CloudWatch logs at this size, data transfer for API calls, the A record queries | well under $1 |
 
 While the server is running, the Elastic IP replaces the address the subnet would have assigned. It is one public IPv4, not a second one. The same $0.005 per hour continues after Infra down until you release the allocation. Clients keep using the DNS name. A rebuild does not change that address.
 
 The instance uses the existing default VPC, so there is no second VPC and no NAT gateway. The GoNetLogo app stack owns the peering. Peering has no hourly charge. Traffic that stays in one availability zone is free. Traffic that crosses availability zones over the peering connection is about $0.01 per GB each way.
 
-`t4g.micro` adds about $3 and can cross the $10 budget while the server is up. Data transfer out to the internet is extra if the API responses are large. The free-tier allowance, if the account still has it, covers the small calls. Split tunnel keeps ordinary browsing off this path.
+`t4g.nano` is about $3 less and is still an accepted `instance_type`, but package installs on 512 MB are why the default moved to `t4g.micro`. Data transfer out to the internet is extra if the API responses are large. The free-tier allowance, if the account still has it, covers the small calls. Split tunnel keeps ordinary browsing off this path.
 
-The first two AWS Budgets in an account are free. GoNetLogo already has one (`gonetlogo-monthly`). This stack adds `openvpn-monthly` at $10 of usage, credits ignored, so the mail still arrives while credits pay the bill. A third budget in the account is about $0.10 a day. AWS sends a confirmation link to `budget_email` before any alert. Open that link.
+The first two AWS Budgets in an account are free. GoNetLogo already has one (`gonetlogo-monthly`). This stack adds `openvpn-monthly` at $15 of usage, credits ignored, so the mail still arrives while credits pay the bill and a running `t4g.micro` does not trip it by itself. A third budget in the account is about $0.10 a day. AWS sends a confirmation link to `budget_email` before any alert. Open that link. If bootstrap was already applied at the old $10 limit, the next bootstrap apply raises it to $15.
 
 ## One-time bootstrap
 
@@ -97,7 +98,13 @@ tofu apply
 
 Keep `terraform.tfstate` from that directory somewhere private. It is gitignored. It is the record of the bucket, the role, the budget, and the Elastic IP. Do not delete it.
 
-That apply allocates the Elastic IP and writes its allocation id to the SSM parameter `/openvpn/network/eip-allocation-id`. The address is tagged `project=openvpn` and `Name=openvpn`, and the provider also tags it `Project=openvpn`. If bootstrap was already applied before the Elastic IP was added, run the same `tofu apply` again from this directory. It adds the address and lets the deploy role associate it. It does not replace the VPN instance. Infra up is what attaches the address, and it fails with a clear message until this parameter exists.
+That apply allocates the Elastic IP and writes its allocation id to the SSM parameter `/openvpn/network/eip-allocation-id`. The address is tagged `project=openvpn` and `Name=openvpn`, and the provider also tags it `Project=openvpn`. It also creates the `openvpn-ami-builder` instance profile and lets the deploy role build and deregister images. If bootstrap was already applied, run the same `tofu apply` again from this directory. It adds whatever is missing. It does not replace the VPN instance. Infra up is what attaches the address, and it fails with a clear message until the Elastic IP parameter exists.
+
+Build the base image after that apply, and before the next Infra up if you want that boot to skip `dnf`:
+
+Actions → **Build AMI** → Run workflow.
+
+The same workflow runs on the first day of each month at 16:00 UTC. It uses the `production` environment, so a required reviewer still has to approve the monthly run. The builder is a temporary `t4g.small` in the default VPC. It reaches the builder through Session Manager and does not open port 22. The image is tagged `project=openvpn` and `Name=openvpn-base-<UTC date and time>`, for example `openvpn-base-20261128-2114`. The workflow then deregisters older `openvpn-base-*` images and their snapshots, and keeps the newest 3. Nothing in the image is a certificate, a client key, or an SSH authorized key. Do not turn on `PACKER_LOG`. Packer's debug log can print the temporary key it uses for that one build.
 
 ```bash
 tofu output -raw eip_public_ip
@@ -171,11 +178,13 @@ tofu init
 tofu apply
 ```
 
-That creates the security group, a `t4g.nano` Amazon Linux 2023 instance in the default VPC's `us-west-2a` subnet, attaches the Elastic IP from bootstrap, writes the A record `vpn.app.sapienexmachina.si` at that address, and creates the log group `/openvpn/server`. It does not create the peering or its routes. User-data installs OpenVPN, pulls the PKI from SSM, and starts it. UDP 1194 is open to `allowed_cidrs`. Port 22 is not open. OpenVPN listens on every address, so the association does not require a config change. Destroy deletes the record and detaches the Elastic IP. It does not release the address, and it does not delete the peering.
+That creates the security group, a `t4g.micro` Amazon Linux 2023 instance in the default VPC's `us-west-2a` subnet, attaches the Elastic IP from bootstrap, writes the A record `vpn.app.sapienexmachina.si` at that address, and creates the log group `/openvpn/server`. It does not create the peering or its routes. The instance boots the newest `openvpn-base` image tagged `project=openvpn`. If none is registered, it boots the current stock Amazon Linux 2023 arm64 image. User-data installs `python3`, `openvpn`, `iptables-nft`, and the CloudWatch agent only when they are missing, then pulls the PKI from SSM and starts OpenVPN. UDP 1194 is open to `allowed_cidrs`. Port 22 is not open. OpenVPN listens on every address, so the association does not require a config change. Destroy deletes the record and detaches the Elastic IP. It does not release the address, it does not delete the peering, and it does not deregister the base image.
 
-The first apply after the Elastic IP exists changes the current instance's public address once, from the subnet-assigned address to the Elastic IP, and updates the A record in the same run. The instance is not replaced for that. Later applies keep the same address, including when user-data replaces the instance: the association moves to the new instance and the DNS name does not change. A later apply does not replace the instance just because Amazon published a new AMI. Changing user-data does replace it. Clients keep the same profile. Adding a client does not replace the instance. After that first address change, resolvers may keep the old address for up to the 60 second TTL.
+The instance's `ami` is ignored after create. A later Build AMI, including the monthly one, does not replace a server that is already running, and it does not show up as an instance replacement on the next plan. `tofu output ami_id` still reports the image a new instance would use. To boot that newer image, run Infra down and then Infra up, or change user-data, which replaces the instance. The first Infra up after this user-data change does replace the instance once, and that new instance is a `t4g.micro`. Build the image first if that boot should skip `dnf`.
 
-If `t4g.nano` runs out of memory during `dnf`, set `instance_type` to `t4g.micro` and apply again. User-data also creates a 1 GB swap file.
+The first apply after the Elastic IP exists changes the current instance's public address once, from the subnet-assigned address to the Elastic IP, and updates the A record in the same run. Later applies keep the same address, including when user-data replaces the instance: the association moves to the new instance and the DNS name does not change. Clients keep the same profile. Adding a client does not replace the instance. After an address change, resolvers may keep the old address for up to the 60 second TTL.
+
+User-data creates a 1 GB swap file when the image does not already have one. The base image includes that file.
 
 ### Session Manager
 
@@ -418,7 +427,7 @@ Bootstrap is not planned in GitHub. An empty local state on the runner would ask
 
 ## What the role can do
 
-The deploy role's trust policy is `sts:AssumeRoleWithWebIdentity` for the two subjects above and audience `sts.amazonaws.com`. Its policies cover the state bucket, the `openvpn-instance` role and instance profile (not its own trust policy), passing that role only to `ec2.amazonaws.com`, the security group and instance in us-west-2, and associating and disassociating the Elastic IP. The policy still lists creating and deleting a VPC peering connection and creating and deleting routes. The vpn stack no longer calls those actions. The GoNetLogo app stack owns the peering and its routes. It cannot create or delete a VPC, a subnet, an internet gateway, or a route table. It cannot allocate or release an Elastic IP. That stays on the administrator who applies bootstrap. In Route 53 it can call `ChangeResourceRecordSets` only on the existing `app.sapienexmachina.si` zone, and only when every name in the change is `vpn.app.sapienexmachina.si` and every type is `A`. It can read that zone's records so OpenTofu can refresh the one record. It cannot delete the zone or change `gonetlogo.app.sapienexmachina.si`. It can also read the public Amazon Linux AMI parameter and read and write SSM parameters under `/openvpn` (including `/openvpn/secrets`, because the client workflow writes keys, and `/openvpn/network/eip-allocation-id`, which bootstrap writes). KMS is limited to calls that SSM makes in this account, for the default SSM key. A deny blocks IAM, S3, SSM, ECR, ECS, and log resources whose names start with `gonetlogo` or `sapienexmachina`, and blocks security-group edits and instance termination against resources tagged with those projects.
+The deploy role's trust policy is `sts:AssumeRoleWithWebIdentity` for the two subjects above and audience `sts.amazonaws.com`. Its policies cover the state bucket, the `openvpn-instance` role and instance profile (not its own trust policy), passing `openvpn-instance` and `openvpn-ami-builder` only to `ec2.amazonaws.com`, the security group and instance in us-west-2, associating and disassociating the Elastic IP, and building images. It can deregister an image and delete a snapshot only when that resource is tagged `project=openvpn`. The Build AMI workflow further limits itself to names starting with `openvpn-base-` and keeps the newest 3. The policy still lists creating and deleting a VPC peering connection and creating and deleting routes. The vpn stack no longer calls those actions. The GoNetLogo app stack owns the peering and its routes. It cannot create or delete a VPC, a subnet, an internet gateway, or a route table. It cannot allocate or release an Elastic IP. That stays on the administrator who applies bootstrap. In Route 53 it can call `ChangeResourceRecordSets` only on the existing `app.sapienexmachina.si` zone, and only when every name in the change is `vpn.app.sapienexmachina.si` and every type is `A`. It can read that zone's records so OpenTofu can refresh the one record. It cannot delete the zone or change `gonetlogo.app.sapienexmachina.si`. It can also read the public Amazon Linux AMI parameter and read and write SSM parameters under `/openvpn` (including `/openvpn/secrets`, because the client workflow writes keys, and `/openvpn/network/eip-allocation-id`, which bootstrap writes). KMS decrypt for parameters is limited to calls that SSM makes in this account. The image build can also use a key when EC2 calls KMS, and it can create a grant only for an AWS resource. A deny blocks IAM, S3, SSM, ECR, ECS, and log resources whose names start with `gonetlogo` or `sapienexmachina`, and blocks security-group edits and instance termination against resources tagged with those projects.
 
 The instance role is `AmazonSSMManagedInstanceCore` plus read of `/openvpn/pki/*` and `/openvpn/clients/*`, decrypt via SSM, and write to the one log group. It cannot read `/openvpn/secrets`.
 
@@ -427,7 +436,9 @@ The instance role is `AmazonSSMManagedInstanceCore` plus read of `/openvpn/pki/*
 - **AssumeRole failed.** The workflow job must set `environment: production`. Compare the subject in the error to `github_subjects`. The id form is the one this repository issues.
 - **Plan failed on the hosted zone.** GoNetLogo's bootstrap has not created `app.sapienexmachina.si`, or this bootstrap has not been applied so the role can read it.
 - **Plan failed on the default VPC.** `vpc-02297ce9cfb0e105d` is missing, or its CIDR is not `172.31.0.0/16`, or `us-west-2a` has no subnet.
-- **Infra up user-data failed.** Session Manager, then `/var/log/cloud-init-output.log`. The usual cause is `init` not run yet, so `/openvpn/pki/ca.crt` is missing. `dnf` dying on `t4g.nano` is the other one. Use `t4g.micro`.
+- **Infra up user-data failed.** Session Manager, then `/var/log/cloud-init-output.log`. The usual cause is `init` not run yet, so `/openvpn/pki/ca.crt` is missing. On a stock Amazon Linux image, `dnf` can still fail. The base image already has the packages. Build it, then replace the instance.
+- **Build AMI cannot pass a role.** Bootstrap has not been applied since `openvpn-ami-builder` was added. `cd infra/bootstrap` and `tofu apply`, then run Build AMI again.
+- **A new image did not replace the server.** That is intentional. `ami` is ignored on the running instance. Infra down and Infra up boots the newest image.
 - **Plan or Infra up failed on the Elastic IP.** `/openvpn/network/eip-allocation-id` is missing. From the administrator shell, `cd infra/bootstrap` and `tofu apply`. Then run Infra up. The plan cannot succeed before that apply.
 - **Client cannot connect.** The server must be up, and the resolver must have the A record for the Elastic IP. The first attach changes the address once. After that, a rebuild keeps the same address. A resolver can keep the previous address for up to the 60 second TTL. A revoked certificate stays revoked.
 - **Client got 10.8.0.200 or higher instead of its static address.** OpenVPN dropped privileges and then could not enter `/etc/openvpn/server` (`0750 root:openvpn`), so it never read `ccd/`. The server runs as group `openvpn`, and as user `openvpn` when that account exists. Sync puts the directory and the CCD files back to `0750`/`0640 root:openvpn` on every run, and leaves `server.key` and the tls-crypt key at `0600 root`. The CRL is `0640 root:openvpn` because it is read again on each connection. A running instance still has the old `user`/`group` lines until the next Infra up, which replaces it because user-data changed. Reconnect after that. The `chmod o+x /etc/openvpn/server` hotfix is not needed on the new instance.

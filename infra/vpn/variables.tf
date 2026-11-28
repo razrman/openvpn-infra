@@ -25,8 +25,8 @@ variable "allowed_cidrs" {
 
 variable "instance_type" {
   type        = string
-  description = "Graviton instance size. t4g.nano is enough for a handful of clients once packages are installed. User-data adds a 1 GB swap file because the install is tight on 512 MB. Use t4g.micro if cloud-init runs out of memory."
-  default     = "t4g.nano"
+  description = "Graviton instance size. t4g.micro is the default. The base image already has the packages, and user-data still adds a 1 GB swap file when the image does not. t4g.nano is still accepted."
+  default     = "t4g.micro"
 
   validation {
     condition     = contains(["t4g.nano", "t4g.micro", "t4g.small"], var.instance_type)

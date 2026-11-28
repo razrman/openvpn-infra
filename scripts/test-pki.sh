@@ -175,6 +175,28 @@ if grep -q 'ec2:AllocateAddress' "$root/infra/bootstrap/iam_infra.tf"; then
   fail "the deploy role must not be able to allocate an Elastic IP"
 fi
 grep -q 'REMOTE_HOST="vpn.app.sapienexmachina.si"' "$script" || fail "client profiles must keep using the hostname"
+grep -q 'default     = "t4g.micro"' "$root/infra/vpn/variables.tf" || fail "instance type default drifted"
+grep -q 'ignore_changes = \[ami\]' "$root/infra/vpn/instance.tf" || fail "a new AMI must not replace a running instance"
+grep -q 'data "aws_ami_ids" "openvpn_base"' "$root/infra/vpn/ami.tf" || fail "vpn stack must look up the project AMI"
+grep -q 'nonsensitive(data.aws_ssm_parameter.al2023_arm.value)' "$root/infra/vpn/ami.tf" || fail "stock Amazon Linux fallback missing"
+grep -q 'packages already installed' "$root/infra/vpn/templates/user-data.sh.tftpl" || fail "user-data must skip packages that are already installed"
+grep -q 'iptables-nft' "$root/infra/vpn/templates/user-data.sh.tftpl" || fail "user-data package list drifted"
+grep -q 'iptables-nft' "$root/packer/provision.sh" || fail "image must preinstall iptables-nft"
+grep -q 'amazon-cloudwatch-agent' "$root/packer/provision.sh" || fail "image must preinstall the cloudwatch agent"
+grep -E -q 'ssh_interface[[:space:]]*=[[:space:]]*"session_manager"' "$root/packer/openvpn-base.pkr.hcl" || fail "builder must use Session Manager"
+grep -E -q 'project[[:space:]]*=[[:space:]]*"openvpn"' "$root/packer/openvpn-base.pkr.hcl" || fail "AMI must be tagged project=openvpn"
+grep -q 'openvpn-ami-builder' "$root/infra/bootstrap/ami.tf" || fail "builder role must live in bootstrap"
+grep -q 'ec2:DeregisterImage' "$root/infra/bootstrap/iam_infra.tf" || fail "deploy role cannot deregister images"
+grep -q 'ec2:ResourceTag/project' "$root/infra/bootstrap/iam_infra.tf" || fail "image delete must require the project tag"
+if grep -R --exclude-dir=.git -E 'BEGIN (OPENSSH |RSA )?PRIVATE KEY' "$root/packer"; then
+  fail "packer files must not contain a private key"
+fi
+if grep -q '/openvpn/secrets' "$root/packer/provision.sh"; then
+  fail "the image provisioner must not read PKI"
+fi
+grep -q 'authorized_keys' "$root/packer/provision.sh" || fail "provisioner must remove the builder key"
+grep -q 'keep=3' "$root/scripts/ami-prune.sh" || fail "image prune must keep three"
+grep -q 'openvpn-base-' "$root/scripts/ami-prune.sh" || fail "image prune must be limited to openvpn-base images"
 grep -q 'MASQUERADE' "$root/infra/vpn/files/nat.sh" || fail "nat script missing masquerade"
 if grep -q '0.0.0.0/0' "$root/infra/vpn/files/nat.sh"; then
   fail "nat script must not masquerade every destination"

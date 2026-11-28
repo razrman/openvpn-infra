@@ -16,6 +16,8 @@ on:
       - ".github/workflows/infra-up.yml"
       - ".github/workflows/infra-down.yml"
       - ".github/workflows/client.yml"
+      - ".github/workflows/build-ami.yml"
+      - "packer/**"
 
 permissions:
   contents: read

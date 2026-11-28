@@ -1,9 +1,5 @@
-data "aws_ssm_parameter" "al2023_arm" {
-  name = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64"
-}
-
 resource "aws_instance" "vpn" {
-  ami           = data.aws_ssm_parameter.al2023_arm.value
+  ami           = local.ami_id
   instance_type = var.instance_type
   subnet_id     = data.aws_subnets.default_public.ids[0]
 
@@ -42,8 +38,10 @@ resource "aws_instance" "vpn" {
     Name = "openvpn"
   }
 
-  # A newer Amazon Linux AMI should not replace a server that is already
-  # up. The next create, after a destroy, reads the parameter again.
+  # A newer openvpn-base image must not replace a server that is already
+  # up. The next create, after this instance is replaced or destroyed,
+  # reads local.ami_id again. ignore_changes is why a monthly build does
+  # not show up as a replacement on later plans.
   lifecycle {
     ignore_changes = [ami]
 

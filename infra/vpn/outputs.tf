@@ -13,6 +13,11 @@ output "vpn_hostname" {
   value       = aws_route53_record.vpn.fqdn
 }
 
+output "ami_id" {
+  description = "Image a new instance would use. The newest openvpn-base AMI tagged project=openvpn, or stock Amazon Linux 2023 arm64 when none is registered. A running instance ignores a newer image until that instance is replaced."
+  value       = local.ami_id
+}
+
 output "instance_id" {
   description = "Instance id for Session Manager. There is no SSH port."
   value       = aws_instance.vpn.id
