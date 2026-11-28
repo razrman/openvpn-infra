@@ -1,7 +1,8 @@
 # Amazon Linux 2023 arm64 image with the packages the VPN server needs.
 # No PKI, certificates, client keys, or SSH authorized_keys. Those stay
-# in SSM and in user-data. The builder connects through Session Manager,
-# so this build does not open port 22.
+# in SSM and in user-data. Packer SSHs to the builder with a temporary
+# key. The temporary security group allows port 22 only from the host
+# running Packer, and both the group and the key are deleted at the end.
 
 packer {
   required_version = ">= 1.11.0"
@@ -45,24 +46,23 @@ variable "ami_name" {
 }
 
 source "amazon-ebs" "openvpn" {
-  region                      = var.region
-  vpc_id                      = var.vpc_id
-  instance_type               = "t4g.small"
-  source_ami                  = var.source_ami
-  ami_name                    = var.ami_name
-  ami_description             = "OpenVPN base image. Packages only. No PKI, certificates, or SSH keys."
-  ssh_username                = "ec2-user"
-  ssh_interface               = "session_manager"
-  ssh_timeout                 = "15m"
-  iam_instance_profile        = "openvpn-ami-builder"
-  associate_public_ip_address = true
-  encrypt_boot                = true
-  force_deregister            = false
-  force_delete_snapshot       = false
-
-  # Session Manager does not use this port. The temporary group still
-  # must not accept SSH from the internet.
-  temporary_security_group_source_cidrs = ["127.0.0.1/32"]
+  region               = var.region
+  vpc_id               = var.vpc_id
+  instance_type        = "t4g.small"
+  source_ami           = var.source_ami
+  ami_name             = var.ami_name
+  ami_description      = "OpenVPN base image. Packages only. No PKI, certificates, or SSH keys."
+  ssh_username         = "ec2-user"
+  ssh_interface        = "public_ip"
+  ssh_timeout          = "15m"
+  iam_instance_profile = "openvpn-ami-builder"
+  # Do not also set temporary_security_group_source_cidrs. Packer ignores
+  # the public-IP setting when that list is non-empty.
+  temporary_security_group_source_public_ip = true
+  associate_public_ip_address               = true
+  encrypt_boot                              = true
+  force_deregister                          = false
+  force_delete_snapshot                     = false
 
   metadata_options {
     http_endpoint               = "enabled"
