@@ -83,7 +83,7 @@ variable "dns_ttl" {
 variable "peer_gonetlogo" {
   type        = bool
   description = "Push the GoNetLogo CIDR route to clients; the peering itself is created by the GoNetLogo stack. Set false to stop pushing that route and to skip masquerade of that CIDR. This does not look up the GoNetLogo VPC, so the push stays on while that stack is down."
-  default     = true
+  default     = false
 }
 
 variable "gonetlogo_cidr" {

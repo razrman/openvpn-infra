@@ -15,10 +15,6 @@ rules:
     to: mac-mini
     proto: tcp
     port: 1337
-  - from: any-client
-    to: gonetlogo
-    proto: tcp
-    port: 8080
   - from: desktop-crnncuc
     to: vpn-server
     proto: tcp

@@ -56,8 +56,7 @@ grep -q "client mac-mini is not active" "$tmp/warn" || fail "missing mac-mini sh
 grep -q -- '-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT' "$tmp/rules" || fail "established"
 grep -q -- '-d 10.8.0.10 -s 10.8.0.11 -p tcp --dport 1337' "$tmp/rules" || fail "jan rule"
 grep -q -- '-s 10.8.0.11 -d 10.8.0.10 -p icmp --icmp-type echo-request' "$tmp/rules" || fail "echo"
-grep -q -- '-d 10.20.0.0/16 -s 10.8.0.11 -p tcp --dport 8080' "$tmp/rules" || fail "gonetlogo from linux-box"
-grep -q -- '-d 10.20.0.0/16 -s 10.8.0.10 -p tcp --dport 8080' "$tmp/rules" || fail "gonetlogo from windows-pc"
+! grep -q -- "-d 10.20.0.0/16" "$tmp/rules" || fail "gonetlogo rule should be gone"
 if grep -q -- '-s 10.8.0.10 -d 10.8.0.11 -p tcp' "$tmp/rules"; then
   fail "windows-pc must not open tcp to linux-box"
 fi
