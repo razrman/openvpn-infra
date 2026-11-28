@@ -48,6 +48,11 @@ output "eip_allocation_id" {
   value       = aws_eip.vpn.id
 }
 
+output "ami_builder_instance_profile" {
+  description = "Instance profile Packer attaches to the temporary builder. Session Manager only. It cannot read /openvpn."
+  value       = aws_iam_instance_profile.ami_builder.name
+}
+
 output "eip_public_ip" {
   description = "Stable public IPv4. The A record points vpn_hostname at it. Infra down does not change this address."
   value       = aws_eip.vpn.public_ip

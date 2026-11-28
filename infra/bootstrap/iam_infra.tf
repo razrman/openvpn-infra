@@ -49,6 +49,21 @@ data "aws_iam_policy_document" "infra" {
     }
   }
 
+  # The Packer builder profile. Bootstrap creates the role. This
+  # statement only lets the workflow pass it to EC2.
+  statement {
+    sid       = "PassAmiBuilderRole"
+    effect    = "Allow"
+    actions   = ["iam:PassRole"]
+    resources = ["arn:aws:iam::${var.account_id}:role/openvpn-ami-builder"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ec2.amazonaws.com"]
+    }
+  }
+
   statement {
     sid    = "ReadSsmCorePolicy"
     effect = "Allow"
@@ -110,6 +125,7 @@ data "aws_iam_policy_document" "infra" {
       "ec2:RevokeSecurityGroupEgress",
       "ec2:RevokeSecurityGroupIngress",
       "ec2:RunInstances",
+      "ec2:StopInstances",
       "ec2:TerminateInstances",
     ]
     resources = ["*"]
@@ -212,6 +228,136 @@ data "aws_iam_policy_document" "infra" {
     effect    = "Allow"
     actions   = ["route53:GetChange"]
     resources = ["arn:aws:route53:::change/*"]
+  }
+
+  # Image build. Create and register are not tag-scoped: the image does
+  # not have its tag until Packer sets it. Deregister and snapshot delete
+  # require project=openvpn, which Packer sets on the image and the
+  # snapshot. The workflow also filters the name openvpn-base-*.
+  statement {
+    sid    = "AmiBuild"
+    effect = "Allow"
+    actions = [
+      "ec2:AttachVolume",
+      "ec2:CopyImage",
+      "ec2:CreateImage",
+      "ec2:CreateKeyPair",
+      "ec2:CreateSnapshot",
+      "ec2:DeleteKeyPair",
+      "ec2:GetPasswordData",
+      "ec2:ModifyImageAttribute",
+      "ec2:ModifySnapshotAttribute",
+      "ec2:RegisterImage",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+
+  statement {
+    sid    = "AmiDeregister"
+    effect = "Allow"
+    actions = [
+      "ec2:DeleteSnapshot",
+      "ec2:DeregisterImage",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/project"
+      values   = ["openvpn"]
+    }
+  }
+
+  # Packer reaches the builder through Session Manager. The document is
+  # AWS-owned, so its ARN has an empty account id.
+  statement {
+    sid    = "AmiSession"
+    effect = "Allow"
+    actions = [
+      "ssm:ResumeSession",
+      "ssm:StartSession",
+      "ssm:TerminateSession",
+    ]
+    resources = [
+      "arn:aws:ec2:${var.aws_region}:${var.account_id}:instance/*",
+      "arn:aws:ssm:${var.aws_region}:${var.account_id}:session/*",
+      "arn:aws:ssm:${var.aws_region}::document/AWS-StartSSHSession",
+      "arn:aws:ssm:*::document/AWS-StartSSHSession",
+    ]
+  }
+
+  statement {
+    sid    = "AmiSessionDescribe"
+    effect = "Allow"
+    actions = [
+      "ssm:DescribeInstanceInformation",
+      "ssm:DescribeSessions",
+      "ssm:GetConnectionStatus",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [var.aws_region]
+    }
+  }
+
+  # Encrypted EBS snapshots for the base image. CreateGrant is how EC2
+  # uses the account's EBS key. It is limited to grants for an AWS service.
+  statement {
+    sid    = "AmiEbsKey"
+    effect = "Allow"
+    actions = [
+      "kms:Decrypt",
+      "kms:DescribeKey",
+      "kms:GenerateDataKey",
+      "kms:GenerateDataKeyWithoutPlaintext",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ec2.${var.aws_region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:CallerAccount"
+      values   = [var.account_id]
+    }
+  }
+
+  statement {
+    sid       = "AmiEbsGrant"
+    effect    = "Allow"
+    actions   = ["kms:CreateGrant"]
+    resources = ["*"]
+
+    condition {
+      test     = "Bool"
+      variable = "kms:GrantIsForAWSResource"
+      values   = ["true"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:CallerAccount"
+      values   = [var.account_id]
+    }
   }
 
   # Public SSM parameter that names the current Amazon Linux 2023 arm64 AMI.

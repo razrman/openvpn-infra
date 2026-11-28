@@ -1,0 +1,96 @@
+# Build the OpenVPN base AMI and delete older copies, keeping the newest
+# 3. The production environment is the approval gate, including the
+# monthly run. Do not set PACKER_LOG. Packer's debug log can print the
+# temporary SSH private key it uses to reach the builder.
+
+name: Build AMI
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 16 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openvpn-ami
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build openvpn-base AMI
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: us-west-2
+      AWS_DEFAULT_REGION: us-west-2
+      PACKER_LOG: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check deploy role variable
+        env:
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ROLE_ARN" ]; then
+            echo "Set the repository variable AWS_DEPLOY_ROLE_ARN to the deploy_role_arn output from infra/bootstrap." >&2
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+          role-session-name: openvpn-ami
+
+      - name: Set up Packer
+        uses: hashicorp/setup-packer@v3.4.0
+        with:
+          version: "1.16.3"
+
+      - name: Resolve source AMI
+        id: source
+        working-directory: packer
+        run: |
+          set -euo pipefail
+          if [ "${PACKER_LOG}" != "0" ]; then
+            echo "PACKER_LOG must stay 0. Debug logs can print the builder key." >&2
+            exit 1
+          fi
+          source_ami="$(aws ssm get-parameter --region us-west-2 --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --query Parameter.Value --output text)"
+          case "$source_ami" in
+            ami-*) ;;
+            *)
+              echo "The public Amazon Linux parameter did not return an AMI id." >&2
+              exit 1
+              ;;
+          esac
+          ami_name="openvpn-base-$(date -u +%Y%m%d-%H%M)"
+          echo "source_ami=${source_ami}"
+          echo "ami_name=${ami_name}"
+          echo "source_ami=${source_ami}" >> "$GITHUB_OUTPUT"
+          echo "ami_name=${ami_name}" >> "$GITHUB_OUTPUT"
+          packer init openvpn-base.pkr.hcl
+
+      - name: Build
+        working-directory: packer
+        env:
+          SOURCE_AMI: ${{ steps.source.outputs.source_ami }}
+          AMI_NAME: ${{ steps.source.outputs.ami_name }}
+        run: |
+          set -euo pipefail
+          packer build -color=false \
+            -var "source_ami=${SOURCE_AMI}" \
+            -var "ami_name=${AMI_NAME}" \
+            openvpn-base.pkr.hcl
+
+      - name: Deregister old images
+        run: bash scripts/ami-prune.sh

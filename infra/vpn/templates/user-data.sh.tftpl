@@ -19,20 +19,24 @@ if ! swapon --show | grep -q /swapfile; then
 fi
 
 echo "openvpn user-data: packages"
-installed=0
-attempt=1
-while [ "$attempt" -le 6 ]; do
-  if dnf install -y python3 openvpn iptables amazon-cloudwatch-agent; then
-    installed=1
-    break
+if rpm -q python3 >/dev/null 2>&1 && rpm -q openvpn >/dev/null 2>&1 && rpm -q iptables-nft >/dev/null 2>&1 && rpm -q amazon-cloudwatch-agent >/dev/null 2>&1; then
+  echo "openvpn user-data: packages already installed"
+else
+  installed=0
+  attempt=1
+  while [ "$attempt" -le 6 ]; do
+    if dnf install -y python3 openvpn iptables-nft amazon-cloudwatch-agent; then
+      installed=1
+      break
+    fi
+    echo "openvpn user-data: dnf failed, retry $attempt" >&2
+    attempt=$((attempt + 1))
+    sleep 10
+  done
+  if [ "$installed" -ne 1 ]; then
+    echo "openvpn user-data: package install failed" >&2
+    exit 1
   fi
-  echo "openvpn user-data: dnf failed, retry $attempt" >&2
-  attempt=$((attempt + 1))
-  sleep 10
-done
-if [ "$installed" -ne 1 ]; then
-  echo "openvpn user-data: package install failed" >&2
-  exit 1
 fi
 
 if ! getent group openvpn >/dev/null; then
