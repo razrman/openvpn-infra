@@ -57,6 +57,10 @@ rm -f /home/ec2-user/.bash_history /root/.bash_history
 rm -f /home/ec2-user/.ssh/authorized_keys /root/.ssh/authorized_keys
 rmdir /home/ec2-user/.ssh 2>/dev/null || true
 
+# Host keys are per-instance private keys. Remove them so each server
+# generates its own at first boot (cloud-init / sshd-keygen on AL2023).
+rm -f /etc/ssh/ssh_host_*
+
 if [ -s /home/ec2-user/.ssh/authorized_keys ] || [ -s /root/.ssh/authorized_keys ]; then
   echo "openvpn ami: refusing to bake an authorized_keys file" >&2
   exit 1
